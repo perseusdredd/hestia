@@ -1,0 +1,147 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+
+import { formString, toActionState, type ActionState } from "@/lib/action-state";
+import { getRequestOrigin } from "@/lib/request-origin";
+import { requireWorkspace } from "@/lib/tenant";
+import { hitInviteRateLimit } from "@/server/rate-limit";
+import {
+  changeMemberRole,
+  createInvitation,
+  deleteWorkspace,
+  leaveWorkspace,
+  removeMember,
+  renameWorkspace,
+  revokeInvitation,
+} from "@/server/workspaces";
+
+export type InviteResult = {
+  inviteUrl: string;
+  email: string;
+  /** "queued" (outbox driver), "sent" or "failed" (SMTP error / no trusted origin). */
+  emailStatus: "queued" | "sent" | "failed";
+};
+
+const TOO_MANY_INVITES = "Çok fazla davet gönderildi. Lütfen bir süre sonra tekrar deneyin.";
+
+function revalidate(slug: string) {
+  revalidatePath(`/w/${slug}`, "layout");
+}
+
+export async function inviteMemberAction(
+  slug: string,
+  _prev: ActionState<InviteResult>,
+  formData: FormData,
+): Promise<ActionState<InviteResult>> {
+  const values = { email: formString(formData, "email"), role: formString(formData, "role") };
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    // Every invite mails inviter-chosen text: throttle before anything is written.
+    if (!hitInviteRateLimit(ctx, values.email)) {
+      return { ok: false, error: TOO_MANY_INVITES, values };
+    }
+    const { invitation, token, deliverEmail } = await createInvitation(ctx, values);
+    // Shown only to this admin, so the request origin is fine here; the
+    // emailed link is built from the trusted AUTH_URL origin in the service.
+    const inviteUrl = `${await getRequestOrigin()}/invite/${token}`;
+    const emailStatus = await deliverEmail(); // never throws
+    revalidate(slug);
+    return { ok: true, data: { inviteUrl, email: invitation.email, emailStatus } };
+  } catch (e) {
+    return { ...toActionState<InviteResult>(e), values };
+  }
+}
+
+export async function revokeInvitationAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    await revokeInvitation(ctx, formString(formData, "id"));
+    revalidate(slug);
+    return { ok: true, message: "Davet iptal edildi." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function changeRoleAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    await changeMemberRole(ctx, formString(formData, "id"), formString(formData, "role"));
+    revalidate(slug);
+    return { ok: true, message: "Rol güncellendi." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function removeMemberAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    await removeMember(ctx, formString(formData, "id"));
+    revalidate(slug);
+    return { ok: true, message: "Üye çıkarıldı." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function leaveWorkspaceAction(
+  slug: string,
+  _prev: ActionState,
+  _formData: FormData,
+): Promise<ActionState> {
+  void _formData;
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    await leaveWorkspace(ctx);
+  } catch (e) {
+    return toActionState(e);
+  }
+  revalidatePath("/app");
+  redirect("/app");
+}
+
+export async function renameWorkspaceAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const values = { name: formString(formData, "name") };
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    await renameWorkspace(ctx, values);
+    revalidate(slug);
+    return { ok: true, message: "Çalışma alanı adı güncellendi.", values };
+  } catch (e) {
+    return { ...toActionState(e), values };
+  }
+}
+
+export async function deleteWorkspaceAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "OWNER");
+    await deleteWorkspace(ctx, { confirmSlug: formString(formData, "confirmSlug") });
+  } catch (e) {
+    return toActionState(e);
+  }
+  revalidatePath("/app");
+  redirect("/app");
+}

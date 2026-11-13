@@ -1,0 +1,448 @@
+// Hestia data model.
+// Tenancy rule: every tenant-owned table carries workspaceId. All reads and
+// writes MUST filter by the workspaceId obtained from requireWorkspace()
+// (src/lib/tenant.ts), never by a client-supplied id alone.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------- Auth ----
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  // Bumped on password change/reset; a JWT carrying an older value is rejected.
+  sessionVersion Int      @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+  memberships     Membership[]
+  invitationsSent Invitation[]  @relation("InvitationInviter")
+  posts           Post[]
+  comments        Comment[]
+  todoListsMade   TodoList[]
+  todosCreated    TodoItem[]    @relation("TodoCreator")
+  todosAssigned   TodoItem[]    @relation("TodoAssignee")
+  foldersCreated  Folder[]
+  filesUploaded   File[]
+  documents       Document[]
+  eventsCreated   Event[]
+  chatMessages    ChatMessage[]
+  notifications      Notification[] @relation("NotificationRecipient")
+  notificationsActed Notification[] @relation("NotificationActor")
+  authTokens         AuthToken[]
+  activities         Activity[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ------------------------------------------------------------- Tenancy ----
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships  Membership[]
+  invitations  Invitation[]
+  posts        Post[]
+  comments     Comment[]
+  todoLists    TodoList[]
+  todoItems    TodoItem[]
+  folders      Folder[]
+  files        File[]
+  documents    Document[]
+  events       Event[]
+  chatMessages ChatMessage[]
+  uploadKeys    UploadKey[]
+  notifications Notification[]
+  activities    Activity[]
+}
+
+model Membership {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role     @default(MEMBER)
+  createdAt   DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  workspaceId String
+  email       String
+  role        Role      @default(MEMBER)
+  // Only the SHA-256 hash of the invite token is stored; the raw token lives in the link.
+  tokenHash   String    @unique
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([email])
+}
+
+// ------------------------------------------------------- Message board ----
+
+model Post {
+  id          String   @id @default(cuid())
+  workspaceId String
+  authorId    String
+  title       String
+  body        String   @db.Text
+  pinned      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments  Comment[]
+
+  @@index([workspaceId, createdAt])
+}
+
+model Comment {
+  id          String   @id @default(cuid())
+  workspaceId String
+  // A comment belongs to exactly one subject (enforced by a CHECK constraint in the migration).
+  postId      String?
+  todoItemId  String?
+  documentId  String?
+  eventId     String?
+  authorId    String
+  body        String   @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  post      Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  todoItem  TodoItem? @relation(fields: [todoItemId], references: [id], onDelete: Cascade)
+  document  Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  event     Event?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  @@index([todoItemId, createdAt])
+  @@index([documentId, createdAt])
+  @@index([eventId, createdAt])
+  @@index([workspaceId])
+}
+
+// -------------------------------------------------------------- To-dos ----
+
+enum TodoStatus {
+  OPEN
+  DONE
+}
+
+model TodoList {
+  id          String   @id @default(cuid())
+  workspaceId String
+  createdById String
+  name        String
+  description String?  @db.Text
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User       @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  items     TodoItem[]
+
+  @@index([workspaceId, position])
+}
+
+model TodoItem {
+  id          String     @id @default(cuid())
+  workspaceId String
+  listId      String
+  createdById String
+  assigneeId  String?
+  title       String
+  notes       String?    @db.Text
+  status      TodoStatus @default(OPEN)
+  dueDate     DateTime?  @db.Date
+  completedAt DateTime?
+  position    Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  list      TodoList  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("TodoCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  assignee  User?     @relation("TodoAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  comments  Comment[]
+
+  @@index([listId, position])
+  @@index([workspaceId, status])
+  @@index([assigneeId])
+}
+
+// ----------------------------------------------------- Files and docs ----
+
+model Folder {
+  id          String   @id @default(cuid())
+  workspaceId String
+  parentId    String?
+  createdById String
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[]   @relation("FolderTree")
+  createdBy User       @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  files     File[]
+  documents Document[]
+
+  @@index([workspaceId, parentId])
+}
+
+model File {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  folderId     String?
+  uploadedById String
+  name         String
+  mimeType     String
+  size         Int
+  // Object key in the storage backend (R2 / local). Always prefixed with the workspaceId.
+  storageKey   String   @unique
+  createdAt    DateTime @default(now())
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folder     Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedBy User      @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, folderId])
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  workspaceId String
+  folderId    String?
+  authorId    String
+  title       String
+  content     String   @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folder    Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments  Comment[]
+
+  @@index([workspaceId, folderId])
+}
+
+// ------------------------------------------------------------ Calendar ----
+
+model Event {
+  id          String   @id @default(cuid())
+  workspaceId String
+  createdById String
+  title       String
+  description String?  @db.Text
+  location    String?
+  startsAt    DateTime
+  endsAt      DateTime
+  allDay      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  comments  Comment[]
+
+  @@index([workspaceId, startsAt])
+}
+
+// ---------------------------------------------------------------- Chat ----
+
+model ChatMessage {
+  id          String   @id @default(cuid())
+  workspaceId String
+  authorId    String
+  body        String   @db.Text
+  // Client-generated id; makes a retried send idempotent.
+  clientId    String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, authorId, clientId])
+  @@index([workspaceId, createdAt])
+}
+
+// Every storage key that has ever been turned into a File row. A key is single-use:
+// completing an upload inserts here, so a deleted file cannot be brought back by
+// replaying its upload token.
+model UploadKey {
+  storageKey  String   @id
+  workspaceId String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// ------------------------------------------------------- Notifications ----
+
+model Notification {
+  id          String    @id @default(cuid())
+  workspaceId String
+  // Recipient. Must be a member of workspaceId at creation time.
+  userId      String
+  actorId     String?
+  // e.g. TODO_ASSIGNED, POST_CREATED, POST_COMMENT, EVENT_CREATED, MEMBER_JOINED
+  type        String
+  title       String
+  body        String?   @db.Text
+  // Workspace-relative path segment, e.g. "messages/<postId>". Never an absolute URL.
+  path        String
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User?     @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, workspaceId, readAt])
+  @@index([userId, createdAt])
+}
+
+// ------------------------------------------------------ Email and tokens ----
+
+enum AuthTokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+// Single-use tokens mailed to a user. Only the SHA-256 hash is stored.
+model AuthToken {
+  id        String        @id @default(cuid())
+  userId    String
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+// Every outgoing email is recorded here first. With MAIL_DRIVER=outbox (dev default)
+// nothing is sent and the row is the delivery; with MAIL_DRIVER=smtp it is also sent.
+model EmailOutbox {
+  id        String    @id @default(cuid())
+  to        String
+  subject   String
+  text      String    @db.Text
+  html      String?   @db.Text
+  // e.g. invite, verify-email, password-reset
+  kind      String
+  sentAt    DateTime?
+  error     String?   @db.Text
+  createdAt DateTime  @default(now())
+
+  @@index([to, createdAt])
+}
+
+// ------------------------------------------------------------ Activity ----
+
+// Append-only workspace activity feed.
+model Activity {
+  id          String   @id @default(cuid())
+  workspaceId String
+  actorId     String?
+  // e.g. POST_CREATED, COMMENT_CREATED, TODO_COMPLETED, FILE_UPLOADED, EVENT_CREATED, MEMBER_JOINED
+  type        String
+  // Short human-readable subject, e.g. the post title.
+  title       String
+  // Workspace-relative path segment, e.g. "messages/<postId>". Never an absolute URL.
+  path        String
+  // What the row is about, e.g. ("post", <id>), so rows can be removed when the subject is deleted.
+  subjectType String?
+  subjectId   String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, subjectType, subjectId])
+}

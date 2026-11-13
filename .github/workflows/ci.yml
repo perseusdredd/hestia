@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hestia
+          POSTGRES_PASSWORD: hestia
+          POSTGRES_DB: hestia
+        # Same host port as docker-compose.yml / .env.example.
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U hestia -d hestia"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://hestia:hestia@127.0.0.1:5433/hestia?schema=public
+      DIRECT_URL: postgresql://hestia:hestia@127.0.0.1:5433/hestia?schema=public
+      AUTH_URL: http://localhost:3230
+      AUTH_TRUST_HOST: "true"
+      STORAGE_DRIVER: local
+      MAIL_DRIVER: outbox
+      MAIL_FROM: Hestia <no-reply@example.com>
+      NEXT_PUBLIC_PUSHER_CLUSTER: eu
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Generate AUTH_SECRET
+        run: |
+          secret="$(openssl rand -base64 33)"
+          echo "::add-mask::$secret"
+          echo "AUTH_SECRET=$secret" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: npm ci # postinstall runs prisma generate
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and service tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Serve the build from the step above (same env as playwright.config.ts
+      # webServer) so the e2e step does not build a second time.
+      - name: Start production server
+        env:
+          ALLOW_LOCAL_STORAGE: "true"
+          ENABLE_DEV_OUTBOX: "true"
+          CRON_SECRET: e2e-cron-secret-0123456789
+        run: |
+          nohup npx next start -p 3230 > next-start.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3230/api/health > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat next-start.log
+          exit 1
+
+      - name: End-to-end tests
+        env:
+          CI: "true"
+          E2E_REUSE: "1"
+          ALLOW_LOCAL_STORAGE: "true"
+          ENABLE_DEV_OUTBOX: "true"
+        run: npm run e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/.report
+            e2e/.results
+            next-start.log
+          retention-days: 7
+          if-no-files-found: ignore

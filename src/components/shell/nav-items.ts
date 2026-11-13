@@ -1,0 +1,34 @@
+import {
+  Activity,
+  CalendarDays,
+  CheckSquare,
+  FolderOpen,
+  House,
+  MessageSquare,
+  MessagesSquare,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
+
+export type NavItem = {
+  /** Path segment under /w/[slug]; "" is the overview. */
+  segment: "" | "messages" | "todos" | "files" | "calendar" | "chat" | "activity" | "settings";
+  label: string;
+  icon: LucideIcon;
+};
+
+/** Single source of truth for the workspace navigation. */
+export const NAV_ITEMS: NavItem[] = [
+  { segment: "", label: "Genel bakış", icon: House },
+  { segment: "messages", label: "Mesajlar", icon: MessageSquare },
+  { segment: "todos", label: "Yapılacaklar", icon: CheckSquare },
+  { segment: "files", label: "Dosyalar", icon: FolderOpen },
+  { segment: "calendar", label: "Takvim", icon: CalendarDays },
+  { segment: "chat", label: "Sohbet", icon: MessagesSquare },
+  { segment: "activity", label: "Akış", icon: Activity },
+  { segment: "settings", label: "Ayarlar", icon: Settings },
+];
+
+export function workspaceHref(slug: string, segment: NavItem["segment"] | string = ""): string {
+  return segment ? `/w/${slug}/${segment}` : `/w/${slug}`;
+}

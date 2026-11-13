@@ -1,0 +1,52 @@
+-- AlterTable
+ALTER TABLE "ChatMessage" ADD COLUMN     "clientId" TEXT;
+
+-- CreateTable
+CREATE TABLE "UploadKey" (
+    "storageKey" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "UploadKey_pkey" PRIMARY KEY ("storageKey")
+);
+
+-- CreateTable
+CREATE TABLE "Notification" (
+    "id" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "actorId" TEXT,
+    "type" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "body" TEXT,
+    "path" TEXT NOT NULL,
+    "readAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Notification_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "UploadKey_workspaceId_idx" ON "UploadKey"("workspaceId");
+
+-- CreateIndex
+CREATE INDEX "Notification_userId_workspaceId_readAt_idx" ON "Notification"("userId", "workspaceId", "readAt");
+
+-- CreateIndex
+CREATE INDEX "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ChatMessage_workspaceId_authorId_clientId_key" ON "ChatMessage"("workspaceId", "authorId", "clientId");
+
+-- AddForeignKey
+ALTER TABLE "UploadKey" ADD CONSTRAINT "UploadKey_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+

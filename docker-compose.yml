@@ -1,0 +1,22 @@
+# Local development database. Production uses Neon (set DATABASE_URL / DIRECT_URL there).
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: hestia-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hestia
+      POSTGRES_PASSWORD: hestia
+      POSTGRES_DB: hestia
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - hestia-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hestia -d hestia"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  hestia-pg-data:
