@@ -45,6 +45,10 @@ function r2Config(): { accountId: string; bucket: string } | null {
   return accountId && bucket ? { accountId, bucket } : null;
 }
 
+function blobEnabled(): boolean {
+  return (process.env.STORAGE_DRIVER || "local").toLowerCase() === "blob";
+}
+
 function createNonce(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
@@ -57,6 +61,7 @@ function pageCsp(nonce: string): string {
     isDev: process.env.NODE_ENV === "development",
     pusherCluster: pusherCluster(),
     r2: r2Config(),
+    blob: blobEnabled(),
     googleAuth: isGoogleAuthEnabled(),
   });
 }

@@ -56,6 +56,13 @@ describe("buildContentSecurityPolicy", () => {
     expect(invalid.get("connect-src")).toEqual(["'self'"]);
   });
 
+  it("allows uploads to the Vercel Blob API in connect-src only when the blob driver is on", () => {
+    const on = directives(buildContentSecurityPolicy({ ...base, blob: true }));
+    expect(on.get("connect-src")).toEqual(["'self'", "https://vercel.com"]);
+    const off = directives(buildContentSecurityPolicy(base));
+    expect(off.get("connect-src")).toEqual(["'self'"]);
+  });
+
   it("allows the Google OAuth redirect in form-action when the provider is enabled", () => {
     const d = directives(buildContentSecurityPolicy({ ...base, googleAuth: true }));
     expect(d.get("form-action")).toEqual(["'self'", "https://accounts.google.com"]);

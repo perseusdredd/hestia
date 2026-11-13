@@ -33,6 +33,15 @@ describe("validate(env)", () => {
     if (prod.ok) expect(prod.env.storageDriver).toBe("r2");
   });
 
+  it("accepts STORAGE_DRIVER=blob with a token or a store id, and rejects it without either", () => {
+    const blob = { ...PROD, STORAGE_DRIVER: "blob", R2_ACCOUNT_ID: undefined, R2_ACCESS_KEY_ID: undefined, R2_SECRET_ACCESS_KEY: undefined, R2_BUCKET: undefined };
+    expect(errorsOf(blob).join()).toMatch(/BLOB_READ_WRITE_TOKEN/);
+    const withToken = validate({ ...blob, BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_x_y" });
+    expect(withToken.ok).toBe(true);
+    if (withToken.ok) expect(withToken.env.storageDriver).toBe("blob");
+    expect(validate({ ...blob, BLOB_STORE_ID: "store_abc" }).ok).toBe(true);
+  });
+
   it("treats blank strings as unset (the .env.example style)", () => {
     const r = validate({ ...DEV, AUTH_GOOGLE_ID: "", AUTH_GOOGLE_SECRET: "", R2_BUCKET: "  ", PUSHER_APP_ID: "" });
     expect(r.ok).toBe(true);

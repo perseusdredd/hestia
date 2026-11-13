@@ -30,6 +30,8 @@ const shape = z.object({
   R2_ACCESS_KEY_ID: optional,
   R2_SECRET_ACCESS_KEY: optional,
   R2_BUCKET: optional,
+  BLOB_READ_WRITE_TOKEN: optional,
+  BLOB_STORE_ID: optional,
   UPLOAD_TOKEN_SECRET: optional,
   PUSHER_APP_ID: optional,
   PUSHER_SECRET: optional,
@@ -47,7 +49,7 @@ const shape = z.object({
 
 export type ServerEnv = z.infer<typeof shape> & {
   isProduction: boolean;
-  storageDriver: "local" | "r2";
+  storageDriver: "local" | "r2" | "blob";
   mailDriver: "outbox" | "smtp";
 };
 
@@ -120,8 +122,8 @@ export function validate(input: RawEnv): EnvValidation {
   // --- Storage
   const driverRaw = (env.STORAGE_DRIVER ?? "local").toLowerCase();
   let storageDriver: ServerEnv["storageDriver"] = "local";
-  if (driverRaw === "r2" || driverRaw === "local") storageDriver = driverRaw;
-  else errors.push(`STORAGE_DRIVER must be "local" or "r2" (got "${env.STORAGE_DRIVER}").`);
+  if (driverRaw === "r2" || driverRaw === "local" || driverRaw === "blob") storageDriver = driverRaw;
+  else errors.push(`STORAGE_DRIVER must be "local", "r2" or "blob" (got "${env.STORAGE_DRIVER}").`);
   const r2 = partialGroup(env, R2_KEYS, "R2 storage");
   if (r2) errors.push(r2);
   if (storageDriver === "r2") {
@@ -134,8 +136,11 @@ export function validate(input: RawEnv): EnvValidation {
       errors.push("R2_BUCKET must be a lowercase bucket name (letters, digits, hyphens).");
     }
   }
+  if (storageDriver === "blob" && !env.BLOB_READ_WRITE_TOKEN && !env.BLOB_STORE_ID) {
+    errors.push('STORAGE_DRIVER="blob" requires BLOB_READ_WRITE_TOKEN (or BLOB_STORE_ID with Vercel OIDC).');
+  }
   if (storageDriver === "local" && isProduction && env.ALLOW_LOCAL_STORAGE !== "true") {
-    errors.push('STORAGE_DRIVER="local" is not allowed in production (the filesystem is not persistent on Vercel); use "r2", or set ALLOW_LOCAL_STORAGE="true" for a local production build.');
+    errors.push('STORAGE_DRIVER="local" is not allowed in production (the filesystem is not persistent on Vercel); use "r2" or "blob", or set ALLOW_LOCAL_STORAGE="true" for a local production build.');
   }
   if (env.UPLOAD_TOKEN_SECRET && env.UPLOAD_TOKEN_SECRET.length < MIN_AUTH_SECRET_LENGTH) {
     errors.push(`UPLOAD_TOKEN_SECRET must be at least ${MIN_AUTH_SECRET_LENGTH} characters when set.`);

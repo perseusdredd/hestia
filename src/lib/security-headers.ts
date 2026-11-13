@@ -19,6 +19,8 @@ export type CspOptions = {
   pusherCluster: string | null;
   /** R2 when STORAGE_DRIVER=r2 is configured, otherwise null. */
   r2: { accountId: string; bucket: string } | null;
+  /** Vercel Blob when STORAGE_DRIVER=blob: browsers PUT uploads to the Blob API. */
+  blob?: boolean;
   /** Google OAuth provider enabled (form-action redirect target, avatar host). */
   googleAuth: boolean;
 };
@@ -38,6 +40,9 @@ export function r2Origins(r2: CspOptions["r2"]): string[] {
   if (R2_BUCKET.test(r2.bucket)) origins.push(`https://${r2.bucket}.${account}.r2.cloudflarestorage.com`);
   return origins;
 }
+
+/** Browser-facing Vercel Blob origin: presigned PUT uploads go to the Blob control API. */
+export const BLOB_API_ORIGIN = "https://vercel.com";
 
 /** pusher-js with `cluster` + forceTLS: websocket on ws-<c>, HTTP fallbacks on sockjs-<c>. */
 export function pusherOrigins(cluster: string | null): string[] {
@@ -67,7 +72,7 @@ export function buildContentSecurityPolicy(opts: CspOptions): string {
   const scriptSrc = ["'self'", `'nonce-${opts.nonce}'`, "'strict-dynamic'"];
   if (opts.isDev) scriptSrc.push("'unsafe-eval'");
 
-  const connectSrc = ["'self'", ...pusher, ...r2];
+  const connectSrc = ["'self'", ...pusher, ...r2, ...(opts.blob ? [BLOB_API_ORIGIN] : [])];
   if (opts.isDev) connectSrc.push("ws:", "wss:");
 
   const imgSrc = ["'self'", "data:", "blob:", ...r2];

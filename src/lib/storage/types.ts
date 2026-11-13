@@ -23,7 +23,7 @@ export type DownloadOptions = {
  * still refuse anything that is not a valid key.
  */
 export interface StorageDriver {
-  readonly name: "local" | "r2";
+  readonly name: "local" | "r2" | "blob";
   /**
    * Where the browser sends the bytes. "local" points at our own route
    * handler (carrying the signed upload token); "r2" is a presigned PUT URL.

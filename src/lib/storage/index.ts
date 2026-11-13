@@ -1,3 +1,4 @@
+import { createBlobDriver } from "./blob";
 import { createLocalDriver } from "./local";
 import { createR2Driver } from "./r2";
 import type { StorageDriver } from "./types";
@@ -5,13 +6,14 @@ import type { StorageDriver } from "./types";
 export * from "./inline";
 export * from "./keys";
 export * from "./types";
+export { createBlobDriver } from "./blob";
 export { createLocalDriver } from "./local";
 export { createR2Driver } from "./r2";
 
 let cached: { name: string; driver: StorageDriver } | null = null;
 
 /**
- * Storage backend selected by STORAGE_DRIVER ("local" default, or "r2").
+ * Storage backend selected by STORAGE_DRIVER ("local" default, "r2" or "blob").
  * The local driver is for development only and refuses to run in production.
  */
 export function getStorage(): StorageDriver {
@@ -20,9 +22,11 @@ export function getStorage(): StorageDriver {
   let driver: StorageDriver;
   if (name === "r2") {
     driver = createR2Driver();
+  } else if (name === "blob") {
+    driver = createBlobDriver();
   } else if (name === "local") {
     if (process.env.NODE_ENV === "production" && process.env.ALLOW_LOCAL_STORAGE !== "true") {
-      throw new Error('STORAGE_DRIVER="local" is for development only; use "r2" in production');
+      throw new Error('STORAGE_DRIVER="local" is for development only; use "r2" or "blob" in production');
     }
     driver = createLocalDriver();
   } else {
