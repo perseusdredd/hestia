@@ -7,6 +7,8 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  # Elle yayın: Actions > Deploy > Run workflow. Seçilen dalı testlere bakmadan canlıya alır.
+  workflow_dispatch:
 
 concurrency:
   group: deploy
@@ -14,13 +16,13 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: SSH ayarı
         env:
