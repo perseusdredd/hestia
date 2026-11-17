@@ -29,9 +29,12 @@ jobs:
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          # Windows'tan yapıştırılınca eklenebilen CR karakterlerini temizle.
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+          # Anahtar okunabiliyor mu? (Yanlış yapıştırılmışsa burada net bir hata görünür.)
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
 
       - name: Kaynağı gönder ve yeniden başlat
         env:
