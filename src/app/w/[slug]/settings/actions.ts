@@ -10,6 +10,7 @@ import { hitInviteRateLimit } from "@/server/rate-limit";
 import {
   changeMemberRole,
   createInvitation,
+  createInviteLink,
   deleteWorkspace,
   leaveWorkspace,
   removeMember,
@@ -48,9 +49,26 @@ export async function inviteMemberAction(
     const inviteUrl = `${await getRequestOrigin()}/invite/${token}`;
     const emailStatus = await deliverEmail(); // never throws
     revalidate(slug);
-    return { ok: true, data: { inviteUrl, email: invitation.email, emailStatus } };
+    return { ok: true, data: { inviteUrl, email: invitation.email ?? values.email, emailStatus } };
   } catch (e) {
     return { ...toActionState<InviteResult>(e), values };
+  }
+}
+
+/** Creates a reusable invite link (no e-mail needed). The link shows up in "Bekleyen davetler". */
+export async function createInviteLinkAction(
+  slug: string,
+  _prev: ActionState<{ id: string }>,
+  formData: FormData,
+): Promise<ActionState<{ id: string }>> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    if (!hitInviteRateLimit(ctx, "invite-link")) return { ok: false, error: TOO_MANY_INVITES };
+    const { invitation } = await createInviteLink(ctx, { role: formString(formData, "role") });
+    revalidate(slug);
+    return { ok: true, message: "Davet bağlantısı oluşturuldu.", data: { id: invitation.id } };
+  } catch (e) {
+    return toActionState<{ id: string }>(e);
   }
 }
 

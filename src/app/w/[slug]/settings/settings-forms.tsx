@@ -14,6 +14,7 @@ import { ROLE_LABELS, type Role } from "@/lib/roles";
 
 import {
   changeRoleAction,
+  createInviteLinkAction,
   deleteWorkspaceAction,
   inviteMemberAction,
   renameWorkspaceAction,
@@ -91,6 +92,56 @@ export function InviteForm({ slug, assignableRoles }: { slug: string; assignable
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Creates a reusable invite link: no e-mail address, any number of people can join with it. */
+export function InviteLinkForm({ slug, assignableRoles }: { slug: string; assignableRoles: Role[] }) {
+  const [state, action, pending] = useActionState<ActionState<{ id: string }>, FormData>(
+    createInviteLinkAction.bind(null, slug),
+    {},
+  );
+  const roles = assignableRoles.filter((r) => r !== "OWNER");
+  useEffect(() => {
+    if (state.ok && state.message) toast.success(state.message);
+  }, [state]);
+  return (
+    <div className="grid gap-3">
+      <form action={action} className="grid gap-3 sm:grid-cols-[10rem_auto] sm:items-start">
+        <div className="grid gap-1.5">
+          <Label htmlFor="invite-link-role" className="sr-only">
+            Bağlantıyla katılanların rolü
+          </Label>
+          <NativeSelect id="invite-link-role" name="role" defaultValue="MEMBER">
+            {roles.map((r) => (
+              <option key={r} value={r}>
+                {ROLE_LABELS[r]}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
+        <SubmitButton pending={pending} pendingText="Oluşturuluyor" variant="outline">
+          Davet bağlantısı oluştur
+        </SubmitButton>
+      </form>
+      {!state.ok ? <FormError message={state.error} /> : null}
+    </div>
+  );
+}
+
+/** One copyable invite link (read-only field + copy button). */
+export function InviteLinkField({ url }: { url: string }) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row">
+      <Input
+        readOnly
+        value={url}
+        aria-label="Herkese açık davet bağlantısı"
+        onFocus={(e) => e.currentTarget.select()}
+        className="font-mono text-xs"
+      />
+      <CopyButton value={url} label="Bağlantıyı kopyala" />
     </div>
   );
 }

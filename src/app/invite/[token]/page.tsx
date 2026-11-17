@@ -11,7 +11,7 @@ import { displayName } from "@/components/user-avatar";
 import { formatDate } from "@/lib/format";
 import { ROLE_LABELS } from "@/lib/roles";
 import { checkSession, sessionExpiredUrl } from "@/lib/tenant";
-import { getInvitationByToken } from "@/server/workspaces";
+import { acceptInvitation, getInvitationByToken } from "@/server/workspaces";
 
 import { AcceptInviteForm } from "./accept-form";
 
@@ -64,8 +64,27 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
 
   const returnPath = `/invite/${token}`;
   const isMember = invite.viewerIsMember;
-  const emailMatches = user ? user.email.toLowerCase() === invite.email.toLowerCase() : false;
+  const emailMatches = user
+    ? invite.reusable || user.email.toLowerCase() === invite.email?.toLowerCase()
+    : false;
+  const emailQuery = invite.email ? `&email=${encodeURIComponent(invite.email)}` : "";
   const inviter = displayName(invite.invitedBy);
+
+  if (!isMember && invite.status === "valid") {
+    // Signed out: straight to the sign-up form (it has a "Giriş yap" link for existing accounts).
+    // After signing up or in, the browser returns here.
+    if (!user) redirect(`/register?callbackUrl=${encodeURIComponent(returnPath)}${emailQuery}`);
+    // Link invites need no extra click: a signed-in visitor joins right away.
+    if (invite.reusable) {
+      let slug: string | null = null;
+      try {
+        slug = (await acceptInvitation({ userId: user.id, email: user.email }, token)).workspace.slug;
+      } catch {
+        // Revoked/expired in the meantime or the inviter lost the right: show the page below.
+      }
+      if (slug) redirect(`/w/${slug}`);
+    }
+  }
 
   return (
     <Shell>
@@ -75,7 +94,9 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
           <CardTitle className="text-xl">{invite.workspace.name}</CardTitle>
           <CardDescription>
             Rol: {ROLE_LABELS[invite.role]}
-            {invite.status === "valid" ? ` · ${formatDate(invite.expiresAt)} tarihine kadar geçerli` : null}
+            {invite.status === "valid" && invite.expiresAt
+              ? ` · ${formatDate(invite.expiresAt)} tarihine kadar geçerli`
+              : null}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -88,28 +109,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
             </>
           ) : invite.status !== "valid" ? (
             <p className="text-sm text-muted-foreground">{STATUS_TEXT[invite.status]}</p>
-          ) : !user ? (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Daveti kabul etmek için <span className="font-medium text-foreground">{invite.email}</span>{" "}
-                adresiyle giriş yapın ya da hesap oluşturun.
-              </p>
-              <div className="grid gap-2">
-                <Link
-                  href={`/register?callbackUrl=${encodeURIComponent(returnPath)}&email=${encodeURIComponent(invite.email)}`}
-                  className={buttonVariants({ size: "lg" })}
-                >
-                  Hesap oluştur
-                </Link>
-                <Link
-                  href={`/login?callbackUrl=${encodeURIComponent(returnPath)}&email=${encodeURIComponent(invite.email)}`}
-                  className={buttonVariants({ size: "lg", variant: "outline" })}
-                >
-                  Giriş yap
-                </Link>
-              </div>
-            </>
-          ) : !emailMatches ? (
+          ) : !user ? null : !emailMatches ? (
             <p className="text-sm text-muted-foreground">
               Bu davet <span className="font-medium text-foreground">{invite.email}</span> adresine
               gönderilmiş, ancak siz <span className="font-medium text-foreground">{user.email}</span>{" "}

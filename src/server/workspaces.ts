@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 
 import { Prisma, type Role } from "@prisma/client";
 import { addDays } from "date-fns";
@@ -47,6 +47,8 @@ export const slugSchema = z
 
 const createWorkspaceSchema = z.object({ name: workspaceNameSchema, slug: slugSchema });
 const inviteSchema = z.object({ email: emailSchema, role: roleSchema });
+// Link invites never grant OWNER: a link can be forwarded to anyone.
+const inviteLinkSchema = z.object({ role: z.enum(["MEMBER", "ADMIN"], { error: "Geçersiz rol." }) });
 const idSchema = z.string().min(1).max(64);
 
 // ----------------------------------------------------------- helpers ----
@@ -57,6 +59,19 @@ export function hashInviteToken(token: string): string {
 
 export function generateInviteToken(): string {
   return randomBytes(32).toString("base64url");
+}
+
+/**
+ * Link invites are reusable, so the admin must be able to copy the link again
+ * later. The token is derived from the invitation id with a server secret
+ * (HMAC) instead of being stored: the DB only holds its SHA-256 hash, and a
+ * database leak alone cannot rebuild a working link.
+ */
+export function inviteLinkToken(invitationId: string): string {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) throw new Error("AUTH_SECRET is not set");
+  const mac = createHmac("sha256", `invite-link:${secret}`).update(invitationId).digest("base64url");
+  return `${invitationId}.${mac}`;
 }
 
 /**
@@ -245,23 +260,26 @@ export async function isWorkspaceMember(ctx: TenantContext, userId: string): Pro
 
 export async function listPendingInvitations(ctx: TenantContext) {
   if (!hasRole(ctx.role, "ADMIN")) throw forbidden();
-  return db.invitation.findMany({
+  const rows = await db.invitation.findMany({
     where: {
       workspaceId: ctx.workspaceId,
       acceptedAt: null,
       revokedAt: null,
-      expiresAt: { gt: new Date() },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
       email: true,
       role: true,
+      reusable: true,
+      useCount: true,
       expiresAt: true,
       createdAt: true,
       invitedBy: { select: { name: true, email: true } },
     },
   });
+  return rows.map((r) => ({ ...r, linkToken: r.reusable ? inviteLinkToken(r.id) : null }));
 }
 
 /**
@@ -319,8 +337,42 @@ export async function createInvitation(ctx: TenantContext, input: unknown) {
     });
     return { invitation, token };
   });
-  const deliverEmail = await queueInvitationEmail(ctx, result.invitation, result.token);
-  return { ...result, deliverEmail };
+  const deliverEmail = await queueInvitationEmail(
+    ctx,
+    { ...result.invitation, email: data.email, expiresAt: result.invitation.expiresAt ?? addDays(new Date(), INVITE_TTL_DAYS) },
+    result.token,
+  );
+  return { ...result, invitation: { ...result.invitation, email: data.email }, deliverEmail };
+}
+
+/**
+ * Create a reusable invite LINK (no e-mail address needed). Anyone who opens
+ * it while signed in can join with the chosen role, any number of times,
+ * until an admin revokes it. Returns the token (it can be rebuilt later with
+ * inviteLinkToken(invitation.id)).
+ */
+export async function createInviteLink(ctx: TenantContext, input: unknown) {
+  if (!hasRole(ctx.role, "ADMIN")) throw forbidden();
+  const data = parseInput(inviteLinkSchema, input);
+  return db.$transaction(async (tx) => {
+    const actor = await lockAndLoadActor(tx, ctx);
+    if (!hasRole(actor.role, "ADMIN")) throw forbidden();
+    const id = randomBytes(15).toString("hex");
+    const token = inviteLinkToken(id);
+    const invitation = await tx.invitation.create({
+      data: {
+        id,
+        workspaceId: ctx.workspaceId,
+        email: null,
+        role: data.role,
+        reusable: true,
+        tokenHash: hashInviteToken(token),
+        invitedById: ctx.userId,
+        expiresAt: null,
+      },
+    });
+    return { invitation, token };
+  });
 }
 
 const failedDelivery = async (): Promise<MailStatus> => "failed";
@@ -492,11 +544,11 @@ export async function getInvitationByToken(token: string, viewerUserId?: string 
     },
   });
   if (!invite) return null;
-  const status: InvitationStatus = invite.acceptedAt
+  const status: InvitationStatus = invite.acceptedAt && !invite.reusable
     ? "accepted"
     : invite.revokedAt
       ? "revoked"
-      : invite.expiresAt <= new Date()
+      : invite.expiresAt && invite.expiresAt <= new Date()
         ? "expired"
         : "valid";
   const viewerIsMember = viewerUserId
@@ -511,6 +563,7 @@ export async function getInvitationByToken(token: string, viewerUserId?: string 
     id: invite.id,
     viewerIsMember,
     email: invite.email,
+    reusable: invite.reusable,
     role: invite.role,
     expiresAt: invite.expiresAt,
     status,
@@ -536,7 +589,8 @@ export async function acceptInvitation(actor: { userId: string; email: string },
     });
     if (!invite) throw notFound("Davet bulunamadı.");
 
-    if (invite.email.toLowerCase() !== actor.email.trim().toLowerCase()) {
+    // Link invites (reusable) are open to any signed-in user; e-mail invites are bound to an address.
+    if (!invite.reusable && invite.email?.toLowerCase() !== actor.email.trim().toLowerCase()) {
       throw forbidden(
         "Bu davet başka bir e-posta adresine gönderilmiş. Davet edilen adresle giriş yapın.",
       );
@@ -548,7 +602,7 @@ export async function acceptInvitation(actor: { userId: string; email: string },
 
     if (existing) {
       // Idempotent: already a member. Consume a still-pending invite.
-      if (!invite.acceptedAt && !invite.revokedAt) {
+      if (!invite.reusable && !invite.acceptedAt && !invite.revokedAt) {
         await tx.invitation.updateMany({
           where: { id: invite.id, acceptedAt: null, revokedAt: null },
           data: { acceptedAt: new Date() },
@@ -557,9 +611,9 @@ export async function acceptInvitation(actor: { userId: string; email: string },
       return { workspace: invite.workspace, membership: existing, alreadyMember: true };
     }
 
-    if (invite.acceptedAt) throw conflict("Bu davet zaten kullanılmış.");
+    if (invite.acceptedAt && !invite.reusable) throw conflict("Bu davet zaten kullanılmış.");
     if (invite.revokedAt) throw conflict("Bu davet iptal edilmiş.");
-    if (invite.expiresAt <= new Date()) throw conflict("Bu davetin süresi dolmuş.");
+    if (invite.expiresAt && invite.expiresAt <= new Date()) throw conflict("Bu davetin süresi dolmuş.");
 
     // The inviter must STILL be allowed to grant this role (they may have been
     // demoted or removed since the invite was created).
@@ -571,17 +625,30 @@ export async function acceptInvitation(actor: { userId: string; email: string },
       throw conflict("Bu davet artık geçerli değil. Yeni bir davet isteyin.");
     }
 
-    // Single-use guard: only one concurrent request can flip acceptedAt.
-    const claimed = await tx.invitation.updateMany({
-      where: {
-        id: invite.id,
-        acceptedAt: null,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      data: { acceptedAt: new Date() },
-    });
-    if (claimed.count !== 1) throw conflict("Bu davet zaten kullanılmış.");
+    if (invite.reusable) {
+      // Link invite: never consumed, just counted. Revocation/expiry are re-checked atomically.
+      const counted = await tx.invitation.updateMany({
+        where: {
+          id: invite.id,
+          revokedAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        data: { useCount: { increment: 1 } },
+      });
+      if (counted.count !== 1) throw conflict("Bu davet artık geçerli değil.");
+    } else {
+      // Single-use guard: only one concurrent request can flip acceptedAt.
+      const claimed = await tx.invitation.updateMany({
+        where: {
+          id: invite.id,
+          acceptedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { acceptedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw conflict("Bu davet zaten kullanılmış.");
+    }
     // Never touch emailVerified here: the inviter holds the raw token (it is
     // the copyable link), so redeeming it proves nothing about the inbox.
 

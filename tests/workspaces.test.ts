@@ -12,12 +12,15 @@ import {
   acceptInvitation,
   changeMemberRole,
   createInvitation,
+  createInviteLink,
   createWorkspace,
   deleteWorkspace,
   getInvitationByToken,
   hashInviteToken,
+  inviteLinkToken,
   leaveWorkspace,
   listMembers,
+  listPendingInvitations,
   removeMember,
   revokeInvitation,
 } from "@/server/workspaces";
@@ -189,6 +192,92 @@ describe("invitations", () => {
     );
     const ok = await createInvitation(adminCtx, { email: trackOutbox(`a-${uniqueSuffix()}@hestia.test`), role: "ADMIN" });
     expect(ok.invitation.role).toBe("ADMIN");
+  });
+});
+
+describe("invite links (no e-mail, reusable)", () => {
+  it("any number of different users can join with one link; it is counted, never consumed", async () => {
+    const owner = await createTestUser();
+    const { workspace, ctx } = await createTestWorkspace(owner.id);
+    const { invitation, token } = await createInviteLink(ctx, { role: "MEMBER" });
+    expect(invitation.email).toBeNull();
+    expect(invitation.reusable).toBe(true);
+    expect(invitation.expiresAt).toBeNull();
+    expect(token).toBe(inviteLinkToken(invitation.id));
+
+    const preview = await getInvitationByToken(token);
+    expect(preview).toMatchObject({ status: "valid", reusable: true, email: null });
+
+    const users = await Promise.all([createTestUser(), createTestUser(), createTestUser()]);
+    for (const u of users) {
+      const res = await acceptInvitation({ userId: u.id, email: u.email }, token);
+      expect(res.membership.role).toBe("MEMBER");
+      expect(res.alreadyMember).toBe(false);
+    }
+    const row = await db.invitation.findUniqueOrThrow({ where: { id: invitation.id } });
+    expect(row.useCount).toBe(3);
+    expect(row.acceptedAt).toBeNull();
+    expect((await getInvitationByToken(token))?.status).toBe("valid");
+    expect(await db.membership.count({ where: { workspaceId: workspace.id } })).toBe(4);
+  });
+
+  it("a member opening the link again joins nothing and is not counted twice", async () => {
+    const owner = await createTestUser();
+    const { ctx } = await createTestWorkspace(owner.id);
+    const { invitation, token } = await createInviteLink(ctx, { role: "MEMBER" });
+    const u = await createTestUser();
+    await acceptInvitation({ userId: u.id, email: u.email }, token);
+    const again = await acceptInvitation({ userId: u.id, email: u.email }, token);
+    expect(again.alreadyMember).toBe(true);
+    expect((await db.invitation.findUniqueOrThrow({ where: { id: invitation.id } })).useCount).toBe(1);
+  });
+
+  it("only ADMIN/OWNER create links, and never with the OWNER role", async () => {
+    const owner = await createTestUser();
+    const { workspace, ctx } = await createTestWorkspace(owner.id);
+    const { ctx: memberCtx } = await createMember(workspace.id, "MEMBER");
+    const { ctx: adminCtx } = await createMember(workspace.id, "ADMIN");
+    await expectServiceError(createInviteLink(memberCtx, { role: "MEMBER" }), "FORBIDDEN");
+    await expectServiceError(createInviteLink(ctx, { role: "OWNER" }), "VALIDATION");
+    await expectServiceError(createInviteLink(adminCtx, { role: "OWNER" }), "VALIDATION");
+    const ok = await createInviteLink(adminCtx, { role: "ADMIN" });
+    expect(ok.invitation.role).toBe("ADMIN");
+  });
+
+  it("a revoked link stops working, and earlier joiners stay members", async () => {
+    const owner = await createTestUser();
+    const { workspace, ctx } = await createTestWorkspace(owner.id);
+    const { invitation, token } = await createInviteLink(ctx, { role: "MEMBER" });
+    const early = await createTestUser();
+    await acceptInvitation({ userId: early.id, email: early.email }, token);
+    await revokeInvitation(ctx, invitation.id);
+    const late = await createTestUser();
+    await expectServiceError(acceptInvitation({ userId: late.id, email: late.email }, token), "CONFLICT");
+    expect((await getInvitationByToken(token))?.status).toBe("revoked");
+    expect(
+      await db.membership.count({ where: { workspaceId: workspace.id, userId: { in: [early.id, late.id] } } }),
+    ).toBe(1);
+  });
+
+  it("is listed for admins with a rebuildable link, and a demoted creator's link is revoked", async () => {
+    const owner = await createTestUser();
+    const { workspace, ctx } = await createTestWorkspace(owner.id);
+    const { user: adminUser, ctx: adminCtx } = await createMember(workspace.id, "ADMIN");
+    const membership = await db.membership.findFirstOrThrow({ where: { workspaceId: workspace.id, userId: adminUser.id } });
+    const { invitation, token } = await createInviteLink(adminCtx, { role: "MEMBER" });
+    const list = await listPendingInvitations(ctx);
+    expect(list.find((i) => i.id === invitation.id)).toMatchObject({ reusable: true, linkToken: token });
+
+    await changeMemberRole(ctx, membership.id, "MEMBER");
+    const u = await createTestUser();
+    await expectServiceError(acceptInvitation({ userId: u.id, email: u.email }, token), "CONFLICT");
+  });
+
+  it("a tampered link token is unknown", async () => {
+    const owner = await createTestUser();
+    const { ctx } = await createTestWorkspace(owner.id);
+    const { invitation } = await createInviteLink(ctx, { role: "MEMBER" });
+    expect(await getInvitationByToken(`${invitation.id}.${"x".repeat(43)}`)).toBeNull();
   });
 });
 

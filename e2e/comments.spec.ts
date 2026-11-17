@@ -11,7 +11,6 @@ async function inviteAndJoin(a: Actor, b: Actor, ws: Workspace) {
   await pa.getByRole("button", { name: "Davet et" }).click();
   const inviteUrl = await pa.getByLabel("Davet bağlantısı").inputValue();
   await pb.goto(new URL(inviteUrl).pathname);
-  await pb.getByRole("link", { name: "Hesap oluştur" }).click();
   await pb.getByLabel("Ad soyad").fill(b.name);
   await pb.getByLabel("Şifre").fill(b.password);
   await pb.getByRole("button", { name: "Hesap oluştur" }).click();

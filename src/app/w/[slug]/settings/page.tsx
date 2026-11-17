@@ -17,7 +17,15 @@ import {
   removeMemberAction,
   revokeInvitationAction,
 } from "./actions";
-import { DeleteWorkspaceForm, InviteForm, RenameWorkspaceForm, RoleSelect } from "./settings-forms";
+import { getRequestOrigin } from "@/lib/request-origin";
+import {
+  DeleteWorkspaceForm,
+  InviteForm,
+  InviteLinkField,
+  InviteLinkForm,
+  RenameWorkspaceForm,
+  RoleSelect,
+} from "./settings-forms";
 
 export const metadata: Metadata = { title: "Ayarlar" };
 
@@ -32,6 +40,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
     isAdmin ? listPendingInvitations(ctx) : Promise.resolve([]),
   ]);
 
+  const origin = isAdmin ? await getRequestOrigin() : "";
   const assignableRoles: Role[] = isOwner ? ["MEMBER", "ADMIN", "OWNER"] : ["MEMBER", "ADMIN"];
   const ownerCount = members.filter((m) => m.role === "OWNER").length;
 
@@ -62,6 +71,15 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
           </CardHeader>
           <CardContent>
             <InviteForm slug={slug} assignableRoles={assignableRoles} />
+            <div className="mt-6 grid gap-2 border-t pt-5">
+              <p className="text-sm font-medium">E-posta yazmadan davet bağlantısı</p>
+              <p className="text-sm text-muted-foreground">
+                Bağlantıya sahip olan herkes, giriş yapıp katılabilir. Kullanım sınırı ve süre yoktur;
+                durdurmak için aşağıdaki &quot;Bekleyen davetler&quot; bölümünden iptal edin. Bağlantıyı
+                yalnızca güvendiğiniz kişilerle paylaşın.
+              </p>
+              <InviteLinkForm slug={slug} assignableRoles={assignableRoles} />
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -131,7 +149,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
         <Card>
           <CardHeader>
             <CardTitle>Bekleyen davetler</CardTitle>
-            <CardDescription>Kabul edilmemiş ve süresi dolmamış davetler.</CardDescription>
+            <CardDescription>Kabul edilmemiş davetler ve herkese açık davet bağlantıları.</CardDescription>
           </CardHeader>
           <CardContent>
             {invitations.length === 0 ? (
@@ -148,11 +166,18 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
                   return (
                     <li key={inv.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{inv.email}</p>
+                        <p className="truncate text-sm font-medium">{inv.email ?? "Davet bağlantısı (herkes katılabilir)"}</p>
                         <p className="text-xs text-muted-foreground">
-                          {formatDate(inv.expiresAt)} tarihine kadar geçerli ·{" "}
-                          {displayName(inv.invitedBy)} davet etti
+                          {inv.reusable
+                            ? `${inv.useCount} kişi katıldı · süresiz`
+                            : `${inv.expiresAt ? formatDate(inv.expiresAt) : ""} tarihine kadar geçerli`}{" "}
+                          · {displayName(inv.invitedBy)} oluşturdu
                         </p>
+                        {inv.linkToken ? (
+                          <div className="mt-2">
+                            <InviteLinkField url={`${origin}/invite/${inv.linkToken}`} />
+                          </div>
+                        ) : null}
                       </div>
                       <Badge variant="outline">{ROLE_LABELS[inv.role]}</Badge>
                       {canRevoke ? (
@@ -160,12 +185,16 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
                           action={revokeInvitationAction.bind(null, slug)}
                           fields={{ id: inv.id }}
                           title="Davet iptal edilsin mi?"
-                          description={`${inv.email} adresine gönderilen bağlantı artık çalışmayacak.`}
+                          description={
+                            inv.email
+                              ? `${inv.email} adresine gönderilen bağlantı artık çalışmayacak.`
+                              : "Bu bağlantıyla artık kimse katılamaz. Daha önce katılanlar üye kalır."
+                          }
                           confirmLabel="Daveti iptal et"
                           successMessage="Davet iptal edildi."
                           trigger={<X aria-hidden />}
                           triggerSize="icon-sm"
-                          triggerLabel={`${inv.email} davetini iptal et`}
+                          triggerLabel={`${inv.email ?? "Davet bağlantısını"} iptal et`}
                         />
                       ) : null}
                     </li>

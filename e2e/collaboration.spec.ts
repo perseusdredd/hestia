@@ -34,10 +34,11 @@ test("invite, roles, chat between two members, notifications, search, removal", 
   await checkPage(pa, testInfo, "settings");
 
   // ---- B registers from the invite and accepts -------------------------
+  // A signed-out invitee lands straight on the sign-up form, with the workspace name and e-mail filled in.
   await pb.goto(new URL(inviteUrl).pathname);
+  await expect(pb).toHaveURL(/\/register\?callbackUrl=/);
   await expect(pb.getByText(ws.name)).toBeVisible();
   await checkPage(pb, testInfo, "invite-signed-out");
-  await pb.getByRole("link", { name: "Hesap oluştur" }).click();
   await expect(pb.getByLabel("E-posta")).toHaveValue(b.email);
   await pb.getByLabel("Ad soyad").fill(b.name);
   await pb.getByLabel("Şifre").fill(b.password);
@@ -263,4 +264,46 @@ test("a signed-in non-member gets the Turkish 404 for every workspace URL", asyn
   await checkPage(c.page, testInfo, "not-found");
   await c.page.getByRole("link", { name: "Çalışma alanlarıma dön" }).click();
   await expect(c.page).toHaveURL(/\/onboarding/);
+});
+
+test("invite link without e-mail: opens sign-up, joins automatically, works for several people until revoked", async ({
+  newActor,
+}) => {
+  const a = await newActor("Linkci");
+  const b = await newActor("Katilan1");
+  const c = await newActor("Katilan2");
+  const d = await newActor("Gec");
+  const ws = await registerWithWorkspace(a);
+  const pa = a.page;
+
+  await pa.goto(`/w/${ws.slug}/settings`);
+  await pa.getByRole("button", { name: "Davet bağlantısı oluştur" }).click();
+  const link = pa.getByLabel("Herkese açık davet bağlantısı");
+  await expect(link).toBeVisible();
+  const inviteUrl = await link.inputValue();
+  expect(inviteUrl).toMatch(/\/invite\/[A-Za-z0-9_.-]+$/);
+
+  // Two different people join with the same link; each lands on the workspace without extra clicks.
+  for (const person of [b, c]) {
+    const p = person.page;
+    await p.goto(new URL(inviteUrl).pathname);
+    await expect(p).toHaveURL(/\/register\?callbackUrl=/);
+    await expect(p.getByText(ws.name)).toBeVisible();
+    await p.getByLabel("E-posta").fill(person.email);
+    await p.getByLabel("Ad soyad").fill(person.name);
+    await p.getByLabel("Şifre").fill(person.password);
+    await p.getByRole("button", { name: "Hesap oluştur" }).click();
+    await expect(p).toHaveURL(new RegExp(`/w/${ws.slug}$`));
+    await expect(p.getByRole("heading", { level: 1, name: ws.name })).toBeVisible();
+  }
+
+  await pa.goto(`/w/${ws.slug}/settings`);
+  await expect(pa.getByText("2 kişi katıldı")).toBeVisible();
+
+  // Revoking stops it for later visitors.
+  await pa.getByRole("button", { name: /Davet bağlantısını iptal et/ }).click();
+  await pa.getByRole("button", { name: "Daveti iptal et" }).click();
+  await expect(pa.getByText("Davet iptal edildi.").first()).toBeVisible();
+  await d.page.goto(new URL(inviteUrl).pathname);
+  await expect(d.page.getByText("Bu davet iptal edilmiş.")).toBeVisible();
 });

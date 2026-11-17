@@ -134,12 +134,17 @@ model Membership {
 model Invitation {
   id          String    @id @default(cuid())
   workspaceId String
-  email       String
+  // null for link invites (anyone holding the link may join).
+  email       String?
   role        Role      @default(MEMBER)
   // Only the SHA-256 hash of the invite token is stored; the raw token lives in the link.
   tokenHash   String    @unique
   invitedById String
-  expiresAt   DateTime
+  // null = never expires (link invites; revoke them to stop them).
+  expiresAt   DateTime?
+  // Link invites are reusable: they are never marked accepted, joins are counted instead.
+  reusable    Boolean   @default(false)
+  useCount    Int       @default(0)
   acceptedAt  DateTime?
   revokedAt   DateTime?
   createdAt   DateTime  @default(now())

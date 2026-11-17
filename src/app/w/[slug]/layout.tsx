@@ -72,16 +72,6 @@ export default async function WorkspaceLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70">
           <div className="flex h-14 items-center gap-2 px-4 sm:px-6">
-            {/* Hestia lives inside the Perseus assistant; this goes back to it. */}
-            <a
-              href={process.env.ASSISTANT_URL || "https://crm.numanbayram.com"}
-              className="flex h-9 shrink-0 items-center gap-1 rounded-lg pr-2 pl-1 text-sm font-medium text-primary-text outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden>
-                <path d="m15 6-6 6 6 6" />
-              </svg>
-              <span className="sr-only sm:not-sr-only">Asistan</span>
-            </a>
             <WorkspaceSwitcher
               current={current}
               workspaces={workspaces}
