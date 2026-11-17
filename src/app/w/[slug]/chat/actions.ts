@@ -6,7 +6,8 @@ import { formString, toActionState, type ActionState } from "@/lib/action-state"
 import type { ChatMessageDTO } from "@/lib/pusher/chat-protocol";
 import { publishChatDeletion, publishChatMessage } from "@/lib/pusher/server";
 import { requireWorkspace } from "@/lib/tenant";
-import { answerMention, mentionsClaude } from "@/server/claude-bot";
+import { notifyChatDm } from "@/server/notifications";
+import { answerMention, CLAUDE_BOT_ID, mentionsClaude } from "@/server/claude-bot";
 import { deleteMessage, sendChatMessage } from "@/server/chat";
 import { completeUpload, createChatImageUpload, type PendingUpload } from "@/server/files";
 
@@ -25,16 +26,24 @@ import { completeUpload, createChatImageUpload, type PendingUpload } from "@/ser
  */
 export async function sendChatMessageAction(
   slug: string,
-  input: { body: string; clientId?: string; fileId?: string },
+  input: { body: string; clientId?: string; fileId?: string; peerId?: string },
 ): Promise<ActionState<ChatMessageDTO>> {
   try {
     const { ctx } = await requireWorkspace(slug);
     const clientId = typeof input?.clientId === "string" && input.clientId !== "" ? input.clientId : undefined;
     const fileId = typeof input?.fileId === "string" && input.fileId !== "" ? input.fileId : undefined;
-    const { message, created } = await sendChatMessage(ctx, { body: input?.body ?? "", clientId, fileId });
+    const peerId = typeof input?.peerId === "string" && input.peerId !== "" ? input.peerId : undefined;
+    const { message, created } = await sendChatMessage(ctx, { body: input?.body ?? "", clientId, fileId, peerId });
     if (created) {
       await publishChatMessage(ctx.workspaceId, message, clientId);
-      if (mentionsClaude(message.body)) after(() => answerMention(ctx.workspaceId, message.id, publishChatMessage));
+      if (peerId === CLAUDE_BOT_ID) {
+        // A private chat with Claude: it answers every message.
+        after(() => answerMention(ctx.workspaceId, message.id, publishChatMessage, { dmWith: ctx.userId }));
+      } else if (peerId) {
+        await notifyChatDm(ctx, peerId, message.body);
+      } else if (mentionsClaude(message.body)) {
+        after(() => answerMention(ctx.workspaceId, message.id, publishChatMessage));
+      }
     }
     return { ok: true, data: message };
   } catch (e) {

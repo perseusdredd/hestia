@@ -85,12 +85,42 @@ function afterCursor(c: ChatCursor): Prisma.ChatMessageWhereInput {
   };
 }
 
+/**
+ * Which messages a conversation holds. Without a peer: the public room only
+ * (never a direct message). With a peer: the direct messages between the
+ * caller and that member, in either direction.
+ */
+function roomFilter(ctx: TenantContext, peerId?: string | null): Prisma.ChatMessageWhereInput {
+  if (!peerId) return { workspaceId: ctx.workspaceId, recipientId: null };
+  return {
+    workspaceId: ctx.workspaceId,
+    OR: [
+      { authorId: ctx.userId, recipientId: peerId },
+      { authorId: peerId, recipientId: ctx.userId },
+    ],
+  };
+}
+
+/** A DM peer must be another current member of the workspace. */
+async function assertPeer(ctx: TenantContext, peerId?: string | null): Promise<void> {
+  if (!peerId) return;
+  if (typeof peerId !== "string" || peerId.length > 64 || peerId === ctx.userId) {
+    throw new ServiceError("VALIDATION", "Geçersiz alıcı.");
+  }
+  const m = await db.membership.findUnique({
+    where: { userId_workspaceId: { userId: peerId, workspaceId: ctx.workspaceId } },
+    select: { id: true },
+  });
+  if (!m) throw notFound("Üye bulunamadı.");
+}
+
 const NEWEST_FIRST = [{ createdAt: "desc" }, { id: "desc" }] satisfies Prisma.ChatMessageOrderByWithRelationInput[];
 const OLDEST_FIRST = [{ createdAt: "asc" }, { id: "asc" }] satisfies Prisma.ChatMessageOrderByWithRelationInput[];
 
 // ------------------------------------------------------------- reading ----
 
 const listSchema = z.object({
+  peer: z.string().max(64).optional(),
   before: z.string().max(100).optional(),
   limit: z.number().int().min(1).max(100).optional(),
 });
@@ -101,11 +131,13 @@ const listSchema = z.object({
  */
 export async function listMessages(
   ctx: TenantContext,
-  input: { before?: string; limit?: number } = {},
+  input: { before?: string; limit?: number; peer?: string } = {},
 ): Promise<{ messages: ChatMessageDTO[]; hasMore: boolean }> {
-  const { before, limit = CHAT_PAGE_SIZE } = parseInput(listSchema, input);
-  const where: Prisma.ChatMessageWhereInput = { workspaceId: ctx.workspaceId };
-  if (before) where.AND = [beforeCursor(cursorOrThrow(before))];
+  const { before, limit = CHAT_PAGE_SIZE, peer } = parseInput(listSchema, input);
+  await assertPeer(ctx, peer);
+  const where: Prisma.ChatMessageWhereInput = {
+    AND: [roomFilter(ctx, peer), ...(before ? [beforeCursor(cursorOrThrow(before))] : [])],
+  };
 
   const rows = await db.chatMessage.findMany({
     where,
@@ -118,6 +150,7 @@ export async function listMessages(
 }
 
 const afterSchema = z.object({
+  peer: z.string().max(64).optional(),
   after: z.string().max(100),
   limit: z.number().int().min(1).max(200).optional(),
 });
@@ -125,7 +158,7 @@ const afterSchema = z.object({
 /** Messages strictly newer than `after`, oldest-first (polling + resync). */
 export async function listMessagesAfter(
   ctx: TenantContext,
-  input: { after: string; limit?: number },
+  input: { after: string; limit?: number; peer?: string },
 ): Promise<ChatMessageDTO[]> {
   return (await listMessagesAfterPage(ctx, input)).messages;
 }
@@ -137,11 +170,12 @@ export async function listMessagesAfter(
  */
 export async function listMessagesAfterPage(
   ctx: TenantContext,
-  input: { after: string; limit?: number },
+  input: { after: string; limit?: number; peer?: string },
 ): Promise<{ messages: ChatMessageDTO[]; hasMoreAfter: boolean }> {
-  const { after, limit = 100 } = parseInput(afterSchema, input);
+  const { after, limit = 100, peer } = parseInput(afterSchema, input);
+  await assertPeer(ctx, peer);
   const rows = await db.chatMessage.findMany({
-    where: { workspaceId: ctx.workspaceId, AND: [afterCursor(cursorOrThrow(after))] },
+    where: { AND: [roomFilter(ctx, peer), afterCursor(cursorOrThrow(after))] },
     orderBy: OLDEST_FIRST,
     take: limit + 1,
     select: messageSelect,
@@ -158,12 +192,16 @@ export const LIVE_IDS_CAP = 300;
 export async function listLiveIdsFrom(
   ctx: TenantContext,
   from: string,
+  peer?: string,
 ): Promise<{ ids: string[]; complete: boolean }> {
   const c = cursorOrThrow(from);
+  await assertPeer(ctx, peer);
   const rows = await db.chatMessage.findMany({
     where: {
-      workspaceId: ctx.workspaceId,
-      OR: [{ createdAt: { gt: c.createdAt } }, { createdAt: c.createdAt, id: { gte: c.id } }],
+      AND: [
+        roomFilter(ctx, peer),
+        { OR: [{ createdAt: { gt: c.createdAt } }, { createdAt: c.createdAt, id: { gte: c.id } }] },
+      ],
     },
     orderBy: NEWEST_FIRST,
     take: LIVE_IDS_CAP + 1,
@@ -179,7 +217,11 @@ export async function listLiveIdsFrom(
 export async function getMessage(ctx: TenantContext, id: string): Promise<ChatMessageDTO> {
   if (typeof id !== "string" || id.length === 0 || id.length > 64) throw notFound("Mesaj bulunamadı.");
   const row = await db.chatMessage.findFirst({
-    where: { id, workspaceId: ctx.workspaceId },
+    where: {
+      id,
+      workspaceId: ctx.workspaceId,
+      OR: [{ recipientId: null }, { authorId: ctx.userId }, { recipientId: ctx.userId }],
+    },
     select: messageSelect,
   });
   if (!row) throw notFound("Mesaj bulunamadı.");
@@ -203,6 +245,7 @@ const createSchema = z
     .trim()
     .max(CHAT_MAX_BODY, { error: `Mesaj en fazla ${CHAT_MAX_BODY} karakter olabilir.` }),
   fileId: z.string().min(1).max(64).optional(),
+  peerId: z.string().min(1).max(64).optional(),
   clientId: z
     .string({ error: "Geçersiz mesaj kimliği." })
     .regex(CHAT_CLIENT_ID_PATTERN, { error: "Geçersiz mesaj kimliği." })
@@ -210,7 +253,7 @@ const createSchema = z
   })
   .refine((v) => v.body.length > 0 || v.fileId, { error: "Mesaj boş olamaz.", path: ["body"] });
 
-type CreateInput = { body: unknown; clientId?: unknown; fileId?: unknown };
+type CreateInput = { body: unknown; clientId?: unknown; fileId?: unknown; peerId?: unknown };
 
 /** Result of an idempotent send: `created` is false when a retry hit an existing row. */
 export type SendResult = { message: ChatMessageDTO; created: boolean };
@@ -267,8 +310,9 @@ export async function createMessage(ctx: TenantContext, input: CreateInput): Pro
 
 /** createMessage plus whether a row was actually inserted. */
 export async function createMessageIdempotent(ctx: TenantContext, input: CreateInput): Promise<SendResult> {
-  const { body, clientId, fileId } = parseInput(createSchema, input);
+  const { body, clientId, fileId, peerId } = parseInput(createSchema, input);
   const actor = await loadActor(ctx);
+  await assertPeer(ctx, peerId);
   if (clientId) {
     const existing = await findByClientId(db, ctx, clientId, body, fileId);
     if (existing) return { message: existing, created: false };
@@ -282,6 +326,7 @@ export async function createMessageIdempotent(ctx: TenantContext, input: CreateI
         body,
         clientId: clientId ?? null,
         fileId: fileId ?? null,
+        recipientId: peerId ?? null,
       },
       select: messageSelect,
     });
@@ -342,7 +387,8 @@ export async function sendRateLimitedMessage(ctx: TenantContext, input: CreateIn
  * (workspaceId, authorId, clientId) is the backstop if anything bypasses it.
  */
 export async function sendChatMessage(ctx: TenantContext, input: CreateInput): Promise<SendResult> {
-  const { body, clientId, fileId } = parseInput(createSchema, input);
+  const { body, clientId, fileId, peerId } = parseInput(createSchema, input);
+  await assertPeer(ctx, peerId);
   try {
     return await db.$transaction(async (tx): Promise<SendResult> => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"hestia:chat-rate:" + ctx.workspaceId + ":" + ctx.userId}))`;
@@ -364,6 +410,7 @@ export async function sendChatMessage(ctx: TenantContext, input: CreateInput): P
           body,
           clientId: clientId ?? null,
           fileId: fileId ?? null,
+          recipientId: peerId ?? null,
         },
         select: messageSelect,
       });
@@ -390,10 +437,15 @@ export async function deleteMessage(
   const actor = await loadActor(ctx);
   const msg = await db.chatMessage.findFirst({
     where: { id, workspaceId: ctx.workspaceId },
-    select: { id: true, authorId: true, fileId: true },
+    select: { id: true, authorId: true, fileId: true, recipientId: true },
   });
+  // A direct message is invisible to everyone but its two people.
+  if (msg?.recipientId && msg.authorId !== actor.userId && msg.recipientId !== actor.userId) {
+    throw notFound("Mesaj bulunamadı.");
+  }
   if (!msg) throw notFound("Mesaj bulunamadı.");
-  if (!canModify({ userId: actor.userId, role: actor.role }, msg.authorId)) {
+  // Admins moderate the public room only; a DM can be deleted by its author alone.
+  if (msg.recipientId ? msg.authorId !== actor.userId : !canModify({ userId: actor.userId, role: actor.role }, msg.authorId)) {
     throw forbidden("Yalnızca kendi mesajlarınızı silebilirsiniz.");
   }
   // Scoped again by workspaceId so the write can never touch another tenant.
@@ -435,4 +487,66 @@ export async function authorizeChatChannel(
   });
   if (!membership) return { allow: false, reason: "NOT_A_MEMBER" };
   return { allow: true, workspaceId };
+}
+
+// ------------------------------------------------------ conversations ----
+
+export type ConversationDTO = {
+  userId: string;
+  name: string | null;
+  email: string;
+  image: string | null;
+  isBot: boolean;
+  lastAt: string | null;
+  lastText: string | null;
+  unread: boolean;
+};
+
+/** The other members as DM partners, most recent conversation first. */
+export async function listConversations(ctx: TenantContext): Promise<ConversationDTO[]> {
+  const [members, recent, unread] = await Promise.all([
+    db.membership.findMany({
+      where: { workspaceId: ctx.workspaceId, userId: { not: ctx.userId } },
+      select: { user: { select: authorSelect } },
+    }),
+    db.chatMessage.findMany({
+      where: {
+        workspaceId: ctx.workspaceId,
+        OR: [{ authorId: ctx.userId, recipientId: { not: null } }, { recipientId: ctx.userId }],
+      },
+      orderBy: NEWEST_FIRST,
+      take: 300,
+      select: { authorId: true, recipientId: true, body: true, createdAt: true, fileId: true },
+    }),
+    db.notification.findMany({
+      where: { workspaceId: ctx.workspaceId, userId: ctx.userId, type: "CHAT_DM", readAt: null },
+      select: { path: true },
+    }),
+  ]);
+  const last = new Map<string, (typeof recent)[number]>();
+  for (const m of recent) {
+    const other = m.authorId === ctx.userId ? m.recipientId : m.authorId;
+    if (other && !last.has(other)) last.set(other, m);
+  }
+  const unreadPeers = new Set(unread.map((n) => n.path.replace("chat?with=", "")));
+  const out = members.map(({ user }): ConversationDTO => {
+    const l = last.get(user.id);
+    return {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      image: user.image,
+      isBot: user.id === "claude-bot",
+      lastAt: l ? l.createdAt.toISOString() : null,
+      lastText: l ? (l.body || (l.fileId ? "📷 Fotoğraf" : "")).slice(0, 80) : null,
+      unread: unreadPeers.has(user.id),
+    };
+  });
+  return out.sort((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? "") || (a.name ?? a.email).localeCompare(b.name ?? b.email));
+}
+
+/** The peer's public profile, for the conversation header (null if not a member). */
+export async function getPeer(ctx: TenantContext, peerId: string) {
+  await assertPeer(ctx, peerId);
+  return db.user.findUnique({ where: { id: peerId }, select: authorSelect });
 }

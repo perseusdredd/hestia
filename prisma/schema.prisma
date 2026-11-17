@@ -40,7 +40,8 @@ model User {
   filesUploaded   File[]
   documents       Document[]
   eventsCreated   Event[]
-  chatMessages    ChatMessage[]
+  chatMessages    ChatMessage[] @relation("ChatAuthor")
+  chatReceived    ChatMessage[] @relation("ChatRecipient")
   notifications      Notification[] @relation("NotificationRecipient")
   notificationsActed Notification[] @relation("NotificationActor")
   authTokens         AuthToken[]
@@ -346,14 +347,18 @@ model ChatMessage {
   clientId    String?
   // Optional photo (a File with fromChat = true); one photo per message.
   fileId      String?  @unique
+  // null = the workspace's public room; otherwise a direct message to this member.
+  recipientId String?
   createdAt   DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author    User      @relation("ChatAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  recipient User?     @relation("ChatRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   file      File?     @relation(fields: [fileId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, authorId, clientId])
   @@index([workspaceId, createdAt])
+  @@index([workspaceId, recipientId, createdAt])
 }
 
 // Every storage key that has ever been turned into a File row. A key is single-use:

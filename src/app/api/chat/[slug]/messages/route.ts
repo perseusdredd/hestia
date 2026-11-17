@@ -48,12 +48,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   const before = sp.get("before");
   const after = sp.get("after");
   const from = sp.get("from");
+  const peer = sp.get("peer") ?? undefined;
 
   try {
     if (after) {
       const [page, live] = await Promise.all([
-        listMessagesAfterPage(ctx, { after }),
-        from ? listLiveIdsFrom(ctx, from) : Promise.resolve(null),
+        listMessagesAfterPage(ctx, { after, peer }),
+        from ? listLiveIdsFrom(ctx, from, peer) : Promise.resolve(null),
       ]);
       const body: ChatMessagesResponse = { messages: page.messages, hasMoreAfter: page.hasMoreAfter };
       if (live) {
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
       }
       return json(body);
     }
-    const page = await listMessages(ctx, before ? { before } : {});
+    const page = await listMessages(ctx, { ...(before ? { before } : {}), peer });
     const body: ChatMessagesResponse = { messages: page.messages, hasMore: page.hasMore };
     return json(body);
   } catch (e) {

@@ -21,7 +21,10 @@ export function ChatComposer({
   onSendImage,
   sendingImage,
   disabled,
+  direct,
 }: {
+  /** Direct message: no @Claude shortcut (it is only for the public room). */
+  direct?: boolean;
   onSend: (body: string) => void;
   onSendImage: (file: File, caption: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   sendingImage?: boolean;
@@ -142,6 +145,7 @@ export function ChatComposer({
         >
           <ImagePlus aria-hidden />
         </Button>
+        {direct ? null : (
         <Button
           type="button"
           variant="ghost"
@@ -154,6 +158,7 @@ export function ChatComposer({
         >
           @Claude
         </Button>
+        )}
         <Textarea
           ref={ref}
           name="body"

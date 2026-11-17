@@ -30,6 +30,8 @@ export const NOTIFICATION_TYPES = [
   "MENTION",
   "EVENT_CREATED",
   "MEMBER_JOINED",
+  /** A direct message in the chat. */
+  "CHAT_DM",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -370,4 +372,44 @@ export async function markAllRead(ctx: TenantContext): Promise<number> {
     data: { readAt: new Date() },
   });
   return res.count;
+}
+
+// ------------------------------------------------------ direct messages ----
+
+/**
+ * A direct message arrived for `peerId`. One unread notification per
+ * conversation is enough: while it is unread, further messages add nothing.
+ */
+export async function notifyChatDm(ctx: TenantContext, peerId: string, text: string): Promise<number> {
+  return safely("notifyChatDm", async () => {
+    // The link opens the conversation with the SENDER (from the recipient's side).
+    const path = `chat?with=${ctx.userId}`;
+    const open = await db.notification.findFirst({
+      where: { workspaceId: ctx.workspaceId, userId: peerId, type: "CHAT_DM", path, readAt: null },
+      select: { id: true },
+    });
+    if (open) return 0;
+    const label = await actorLabel(ctx);
+    return notify(ctx, {
+      recipientIds: [peerId],
+      type: "CHAT_DM",
+      title: `${label} size mesaj gönderdi`,
+      body: clip(text || "📷 Fotoğraf", 500),
+      path,
+    });
+  });
+}
+
+/** Opening a conversation reads its notification. */
+export async function markDmRead(ctx: TenantContext, peerId: string): Promise<void> {
+  await db.notification.updateMany({
+    where: {
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      type: "CHAT_DM",
+      path: `chat?with=${peerId}`,
+      readAt: null,
+    },
+    data: { readAt: new Date() },
+  });
 }

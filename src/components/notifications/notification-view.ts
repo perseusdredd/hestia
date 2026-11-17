@@ -45,6 +45,7 @@ const ICONS: Record<string, LucideIcon> = {
   MENTION: AtSign,
   EVENT_CREATED: CalendarDays,
   MEMBER_JOINED: UserPlus,
+  CHAT_DM: MessageSquare,
 };
 
 export function notificationIcon(type: string): LucideIcon {

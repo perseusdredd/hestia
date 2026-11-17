@@ -31,6 +31,8 @@ function useIsClient() {
 export function ChatRoom({
   slug,
   workspaceId,
+  peerId,
+  peerName,
   me,
   initialMessages,
   initialHasMore,
@@ -38,12 +40,15 @@ export function ChatRoom({
 }: {
   slug: string;
   workspaceId: string;
+  /** Set for a direct-message conversation; absent for the public room. */
+  peerId?: string;
+  peerName?: string;
   me: ChatAuthor & { role: Role };
   initialMessages: ChatMessageDTO[];
   initialHasMore: boolean;
   realtime: PublicRealtimeConfig | null;
 }) {
-  const feed = useChatFeed({ slug, workspaceId, initialMessages, initialHasMore, realtime });
+  const feed = useChatFeed({ slug, workspaceId, peerId, initialMessages, initialHasMore, realtime });
   const isClient = useIsClient();
   const [deleteTarget, setDeleteTarget] = useState<FeedItem | null>(null);
   const [unseen, setUnseen] = useState(0);
@@ -166,7 +171,8 @@ export function ChatRoom({
     });
   }, [feed]);
 
-  const isAdmin = hasRole(me.role, "ADMIN");
+  // Admins moderate the public room only; a direct message is deleted by its author.
+  const isAdmin = !peerId && hasRole(me.role, "ADMIN");
   const canDelete = useCallback((item: FeedItem) => isAdmin || item.author.id === me.id, [isAdmin, me.id]);
   // A photo that finishes loading grows the list: keep the newest message in view.
   const onImageLoad = useCallback(() => {
@@ -200,7 +206,11 @@ export function ChatRoom({
             <EmptyState
               icon={MessagesSquare}
               title="Henüz mesaj yok"
-              description="İlk mesajı yazarak ekip sohbetini başlatın. Çalışma alanındaki herkes burada yazılanları görür."
+              description={
+                peerId
+                  ? `${peerName ?? "Bu kişi"} ile özel sohbetiniz. Yazdıklarınızı yalnızca siz ikiniz görürsünüz.`
+                  : "İlk mesajı yazarak ekip sohbetini başlatın. Çalışma alanındaki herkes burada yazılanları görür."
+              }
               className="w-full max-w-md border-none"
             />
           </div>
@@ -254,6 +264,7 @@ export function ChatRoom({
       {feed.problem ? <ProblemBanner problem={feed.problem} /> : null}
 
       <ChatComposer
+        direct={Boolean(peerId)}
         onSend={feed.send}
         onSendImage={feed.sendImage}
         sendingImage={feed.sendingImage}

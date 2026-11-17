@@ -39,8 +39,9 @@ const LIVE_WINDOW = 200;
 
 type FetchResult = { ok: true; data: ChatMessagesResponse } | { ok: false; problem: Exclude<FeedProblem, null> };
 
-async function fetchMessages(slug: string, query: URLSearchParams): Promise<FetchResult> {
+async function fetchMessages(slug: string, query: URLSearchParams, peerId?: string): Promise<FetchResult> {
   try {
+    if (peerId) query.set("peer", peerId);
     const qs = query.toString();
     const res = await fetch(`/api/chat/${encodeURIComponent(slug)}/messages${qs ? `?${qs}` : ""}`, {
       cache: "no-store",
@@ -70,10 +71,12 @@ function newClientId(): string {
 export function useChatFeed({
   slug,
   workspaceId,
+  peerId,
   initialMessages,
   initialHasMore,
   realtime,
 }: {
+  peerId?: string;
   slug: string;
   workspaceId: string;
   initialMessages: ChatMessageDTO[];
@@ -139,7 +142,7 @@ export function useChatFeed({
       if (after) query.set("after", after);
       if (after && from) query.set("from", from);
 
-      const res = await fetchMessages(slug, query);
+      const res = await fetchMessages(slug, query, peerId);
       if (!res.ok) {
         setProblem(res.problem);
         if (res.problem === "no-access") {
@@ -155,7 +158,7 @@ export function useChatFeed({
       let truncated = false;
       if (after) {
         const all = await collectAfter(data, async (cursor) => {
-          const r = await fetchMessages(slug, new URLSearchParams({ after: cursor }));
+          const r = await fetchMessages(slug, new URLSearchParams({ after: cursor }), peerId);
           return r.ok ? r.data : null;
         });
         if (!all) {
@@ -170,7 +173,7 @@ export function useChatFeed({
       if (truncated) {
         // Too far behind to page through: restart from the newest page and let
         // "load older" fill the history.
-        const page = await fetchMessages(slug, new URLSearchParams());
+        const page = await fetchMessages(slug, new URLSearchParams(), peerId);
         if (!page.ok) return false;
         serverCursorRef.current = maxCursor(null, page.data.messages.at(-1)?.cursor);
         setMessages(page.data.messages.filter((m) => !deletedIds.current.has(m.id)));
@@ -192,7 +195,7 @@ export function useChatFeed({
       if (!after && typeof data.hasMore === "boolean") setHasMore(data.hasMore);
       return true;
     },
-    [slug, reconcile],
+    [slug, peerId, reconcile],
   );
 
   /** Coalesces overlapping calls (every realtime event asks for a sync). */
@@ -252,7 +255,7 @@ export function useChatFeed({
     if (!oldest || loadingOlder) return false;
     setLoadingOlder(true);
     setOlderError(null);
-    const res = await fetchMessages(slug, new URLSearchParams({ before: oldest }));
+    const res = await fetchMessages(slug, new URLSearchParams({ before: oldest }), peerId);
     setLoadingOlder(false);
     if (!res.ok) {
       setOlderError(
@@ -265,12 +268,12 @@ export function useChatFeed({
     reconcile(res.data.messages);
     setHasMore(Boolean(res.data.hasMore));
     return older.length > 0;
-  }, [slug, loadingOlder, reconcile]);
+  }, [slug, peerId, loadingOlder, reconcile]);
 
   const deliver = useCallback(
     async (clientId: string, body: string) => {
       try {
-        const res = await sendChatMessageAction(slug, { body, clientId });
+        const res = await sendChatMessageAction(slug, { body, clientId, peerId });
         if (res.ok && res.data) {
           confirmedClientIds.current.add(clientId);
           settle(res.data, clientId);
@@ -288,7 +291,7 @@ export function useChatFeed({
         );
       }
     },
-    [slug, settle],
+    [slug, peerId, settle],
   );
 
   const send = useCallback(
@@ -340,7 +343,7 @@ export function useChatFeed({
         const done = await completeChatImageUploadAction(slug, target.token);
         if (!done.ok || !done.data) return { ok: false, error: done.error ?? "Fotoğraf yüklenemedi." };
         const clientId = newClientId();
-        const res = await sendChatMessageAction(slug, { body: caption, clientId, fileId: done.data.id });
+        const res = await sendChatMessageAction(slug, { body: caption, clientId, fileId: done.data.id, peerId });
         if (res.ok && res.data) {
           confirmedClientIds.current.add(clientId);
           settle(res.data, clientId);
@@ -353,7 +356,7 @@ export function useChatFeed({
         setSendingImage(false);
       }
     },
-    [slug, settle],
+    [slug, peerId, settle],
   );
 
   return useMemo(
