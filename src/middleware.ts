@@ -13,6 +13,8 @@ const AUTH_PAGES = new Set(["/login", "/register"]);
 function isPublic(pathname: string): boolean {
   return (
     pathname === "/" ||
+    // Perseus single sign-on: the route verifies the signed token itself.
+    pathname === "/sso" ||
     AUTH_PAGES.has(pathname) ||
     pathname.startsWith("/invite/") ||
     pathname.startsWith("/api/auth/") ||

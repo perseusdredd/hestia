@@ -45,6 +45,7 @@ const shape = z.object({
   MAIL_FROM: optional,
   ENABLE_DEV_OUTBOX: optional,
   CRON_SECRET: optional,
+  HESTIA_SSO_SECRET: optional,
 });
 
 export type ServerEnv = z.infer<typeof shape> & {

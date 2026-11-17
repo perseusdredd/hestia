@@ -10,6 +10,7 @@ import { authConfig } from "@/auth.config";
 import { db } from "@/lib/db";
 import { isGoogleAuthEnabled } from "@/lib/safe-redirect";
 import { verifySessionReissueProof } from "@/server/auth-tokens";
+import { consumeSsoToken } from "@/server/sso";
 import { AUTH_LIMITS, clientIp, hitRateLimit } from "@/server/rate-limit";
 
 const credentialsSchema = z.object({
@@ -54,6 +55,19 @@ const providers: Provider[] = [
     },
   }),
 ];
+
+// One-click sign-in from the Perseus assistant (see src/server/sso.ts).
+providers.push(
+  Credentials({
+    id: "sso",
+    credentials: { token: { type: "text" } },
+    async authorize(raw) {
+      const token = typeof raw?.token === "string" ? raw.token : "";
+      const user = await consumeSsoToken(token);
+      return user ? { id: user.id, email: user.email, name: user.name, image: user.image } : null;
+    },
+  }),
+);
 
 if (isGoogleAuthEnabled()) {
   providers.push(

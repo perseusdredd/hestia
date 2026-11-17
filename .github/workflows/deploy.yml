@@ -1,0 +1,51 @@
+name: Deploy
+
+# CI main'de yeşil bittiğinde sunucuya yayınlar. Sunucuya yalnızca kısıtlı bir
+# anahtarla girilir; o anahtar sadece "bu kaynağı al ve yeniden başlat" işini yapabilir.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: SSH ayarı
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Kaynağı gönder ve yeniden başlat
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          git archive --format=tar.gz HEAD | \
+            ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" deploy
+
+      - name: Canlı kontrol
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS https://saas.numanbayram.com/api/health; then exit 0; fi
+            sleep 5
+          done
+          echo "Canlı sağlık kontrolü başarısız" >&2
+          exit 1

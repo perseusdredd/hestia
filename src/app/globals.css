@@ -57,91 +57,91 @@
 }
 
 /*
- * Hestia palette: warm paper neutrals (hue 50-75, very low chroma) and one
- * ember/terracotta accent. Every text pair is >= 4.5:1 and every
- * UI boundary (input, ring, border-strong) >= 3:1 in both themes.
+ * Hestia palette: matches the Perseus assistant app (iOS-style system colors,
+ * grouped backgrounds, hairline separators, one blue accent). Every text pair is
+ * >= 4.5:1 and every UI boundary (input, ring, border-strong) >= 3:1 in both themes.
  */
 :root {
-  --background: oklch(0.982 0.005 75);
-  --foreground: oklch(0.225 0.014 50);
-  --card: oklch(0.996 0.002 75);
-  --card-foreground: oklch(0.225 0.014 50);
-  --popover: oklch(0.996 0.002 75);
-  --popover-foreground: oklch(0.225 0.014 50);
-  --primary: oklch(0.545 0.15 40);
-  --primary-foreground: oklch(0.99 0.004 75);
-  --primary-soft: oklch(0.945 0.03 50);
-  --primary-text: oklch(0.5 0.14 40);
-  --secondary: oklch(0.948 0.008 70);
-  --secondary-foreground: oklch(0.255 0.014 50);
-  --muted: oklch(0.955 0.007 70);
-  --muted-foreground: oklch(0.49 0.016 55);
-  --accent: oklch(0.948 0.01 65);
-  --accent-foreground: oklch(0.225 0.014 50);
-  --destructive: oklch(0.52 0.2 22);
-  --success: oklch(0.47 0.1 155);
-  --success-soft: oklch(0.955 0.03 155);
-  --warning: oklch(0.5 0.11 70);
-  --warning-soft: oklch(0.955 0.04 85);
-  --border: oklch(0.905 0.009 70);
-  --border-strong: oklch(0.64 0.014 60);
-  --input: oklch(0.64 0.014 60);
-  --ring: oklch(0.545 0.15 40);
-  --chart-1: oklch(0.545 0.15 40);
-  --chart-2: oklch(0.49 0.016 55);
-  --chart-3: oklch(0.7 0.08 60);
-  --chart-4: oklch(0.36 0.014 50);
-  --chart-5: oklch(0.82 0.03 70);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.965 0.007 72);
-  --sidebar-foreground: oklch(0.3 0.014 50);
-  --sidebar-primary: oklch(0.545 0.15 40);
-  --sidebar-primary-foreground: oklch(0.99 0.004 75);
-  --sidebar-accent: oklch(0.93 0.012 65);
-  --sidebar-accent-foreground: oklch(0.2 0.014 50);
-  --sidebar-border: oklch(0.905 0.009 70);
-  --sidebar-ring: oklch(0.545 0.15 40);
+  --background: #f2f2f7;
+  --foreground: #1c1c1e;
+  --card: #ffffff;
+  --card-foreground: #1c1c1e;
+  --popover: #ffffff;
+  --popover-foreground: #1c1c1e;
+  --primary: #0066cc;
+  --primary-foreground: #ffffff;
+  --primary-soft: #e3effb;
+  --primary-text: #0058b0;
+  --secondary: #e9e9ee;
+  --secondary-foreground: #1c1c1e;
+  --muted: #ececf1;
+  --muted-foreground: #636366;
+  --accent: #e5e5ea;
+  --accent-foreground: #1c1c1e;
+  --destructive: #d70015;
+  --success: #187a34;
+  --success-soft: #e2f4e7;
+  --warning: #9a4400;
+  --warning-soft: #fdeed9;
+  --border: #dcdce1;
+  --border-strong: #8a8a8e;
+  --input: #8a8a8e;
+  --ring: #0066cc;
+  --chart-1: #2f7be0;
+  --chart-2: #f26a21;
+  --chart-3: #1ea974;
+  --chart-4: #5e4bc4;
+  --chart-5: #c7c7cc;
+  --radius: 0.75rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1c1c1e;
+  --sidebar-primary: #0066cc;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececf1;
+  --sidebar-accent-foreground: #1c1c1e;
+  --sidebar-border: #dcdce1;
+  --sidebar-ring: #0066cc;
 }
 
 .dark {
-  --background: oklch(0.185 0.008 55);
-  --foreground: oklch(0.945 0.008 75);
-  --card: oklch(0.215 0.009 55);
-  --card-foreground: oklch(0.945 0.008 75);
-  --popover: oklch(0.235 0.009 55);
-  --popover-foreground: oklch(0.945 0.008 75);
-  --primary: oklch(0.72 0.135 48);
-  --primary-foreground: oklch(0.2 0.02 45);
-  --primary-soft: oklch(0.3 0.045 45);
-  --primary-text: oklch(0.76 0.12 50);
-  --secondary: oklch(0.27 0.009 55);
-  --secondary-foreground: oklch(0.945 0.008 75);
-  --muted: oklch(0.255 0.009 55);
-  --muted-foreground: oklch(0.72 0.014 65);
-  --accent: oklch(0.28 0.012 55);
-  --accent-foreground: oklch(0.945 0.008 75);
-  --destructive: oklch(0.7 0.17 25);
-  --success: oklch(0.76 0.11 155);
-  --success-soft: oklch(0.27 0.035 155);
-  --warning: oklch(0.8 0.12 80);
-  --warning-soft: oklch(0.28 0.04 75);
-  --border: oklch(0.3 0.009 55);
-  --border-strong: oklch(0.53 0.012 60);
-  --input: oklch(0.53 0.012 60);
-  --ring: oklch(0.72 0.135 48);
-  --chart-1: oklch(0.72 0.135 48);
-  --chart-2: oklch(0.72 0.014 65);
-  --chart-3: oklch(0.55 0.08 55);
-  --chart-4: oklch(0.86 0.01 70);
-  --chart-5: oklch(0.4 0.012 55);
-  --sidebar: oklch(0.165 0.008 55);
-  --sidebar-foreground: oklch(0.86 0.01 70);
-  --sidebar-primary: oklch(0.72 0.135 48);
-  --sidebar-primary-foreground: oklch(0.2 0.02 45);
-  --sidebar-accent: oklch(0.255 0.012 55);
-  --sidebar-accent-foreground: oklch(0.96 0.008 75);
-  --sidebar-border: oklch(0.28 0.009 55);
-  --sidebar-ring: oklch(0.72 0.135 48);
+  --background: #000000;
+  --foreground: #f5f5f7;
+  --card: #1c1c1e;
+  --card-foreground: #f5f5f7;
+  --popover: #2c2c2e;
+  --popover-foreground: #f5f5f7;
+  --primary: #0a6fe0;
+  --primary-foreground: #ffffff;
+  --primary-soft: #0c2a4d;
+  --primary-text: #5aaeff;
+  --secondary: #2c2c2e;
+  --secondary-foreground: #f5f5f7;
+  --muted: #2c2c2e;
+  --muted-foreground: #98989f;
+  --accent: #2c2c2e;
+  --accent-foreground: #f5f5f7;
+  --destructive: #ff6961;
+  --success: #30d158;
+  --success-soft: #0f2a18;
+  --warning: #ff9f0a;
+  --warning-soft: #33230a;
+  --border: #2e2e31;
+  --border-strong: #707076;
+  --input: #707076;
+  --ring: #0a84ff;
+  --chart-1: #4a9bff;
+  --chart-2: #ff8a3d;
+  --chart-3: #30c48d;
+  --chart-4: #9b8cf0;
+  --chart-5: #48484a;
+  --sidebar: #0a0a0b;
+  --sidebar-foreground: #f5f5f7;
+  --sidebar-primary: #0a84ff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2c2c2e;
+  --sidebar-accent-foreground: #f5f5f7;
+  --sidebar-border: #2e2e31;
+  --sidebar-ring: #0a84ff;
 }
 
 @layer base {
@@ -149,15 +149,20 @@
     @apply border-border outline-ring/50;
   }
   html {
-    @apply font-sans;
+    /* Same system font stack as Perseus (SF on Apple devices), Geist as fallback. */
+    font-family:
+      -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", var(--font-sans), system-ui,
+      "Segoe UI", sans-serif;
     color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
   }
   html.dark {
     color-scheme: dark;
   }
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   ::selection {
     background: color-mix(in oklch, var(--primary) 24%, transparent);
