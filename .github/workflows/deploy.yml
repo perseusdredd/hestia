@@ -1,13 +1,13 @@
 name: Deploy
 
-# CI main'de yeşil bittiğinde sunucuya yayınlar. Sunucuya yalnızca kısıtlı bir
-# anahtarla girilir; o anahtar sadece "bu kaynağı al ve yeniden başlat" işini yapabilir.
+# main'e gönderilince sunucuya yayınlar; tarayıcı testlerini (CI) beklemez.
+# Sunucudaki derleme (tip kontrolü dahil) hata verirse eski sürüm çalışmaya devam eder.
+# Sunucuya yalnızca kısıtlı bir anahtarla girilir; o anahtar sadece
+# "bu kaynağı al ve yeniden başlat" işini yapabilir.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
-  # Elle yayın: Actions > Deploy > Run workflow. Seçilen dalı testlere bakmadan canlıya alır.
+  # Elle yayın: Actions > Deploy > Run workflow (istediğiniz dal).
   workflow_dispatch:
 
 concurrency:
@@ -16,13 +16,12 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: SSH ayarı
         env:

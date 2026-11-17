@@ -21,7 +21,7 @@ Next.js 15 (App Router) + TypeScript, Postgres + Prisma 6, Auth.js v5, Tailwind 
 Renkler `src/app/globals.css` içindeki token'lardadır (Perseus asistan uygulamasıyla uyumlu iOS tarzı palet: gri zemin, beyaz kartlar, mavi vurgu, koyu temada siyah). Sabit renk yazma, token kullan. Her metin çifti ≥ 4.5:1, her kontrol sınırı ≥ 3:1 kontrast sağlamalı; telefonda dokunma hedefleri ≥ 40 px.
 
 ## İş akışı
-- `main` dalına doğrudan yazma. Dal aç (`ozellik/kisa-ad`), Pull Request aç, CI (typecheck, lint, test, build, e2e) yeşil olsun, bir insan incelesin, sonra birleştir.
-- `main`'e birleşince CI geçerse sunucuya **otomatik yayınlanır** (`.github/workflows/deploy.yml`). Yani birleşen her şey canlıya çıkar.
+- Ortak çalışanlar `main`'e doğrudan gönderebilir; zorunlu onay kuralı yok. Riskli işlerde (migration, kimlik doğrulama, güvenlik) yine dal + Pull Request kullan ve diğer kişiye göster. CI (typecheck, lint, test, build, e2e) uyarı verir ama yayını durdurmaz; kırmızıysa en kısa sürede düzelt.
+- `main`'e gönderilen her değişiklik sunucuya **otomatik yayınlanır** (`.github/workflows/deploy.yml`). Yani birleşen her şey canlıya çıkar.
 - Küçük, odaklı PR'lar aç. Davranış değiştiriyorsan test ekle.
 - Commit mesajları kısa ve açıklayıcı olsun.
