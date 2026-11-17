@@ -14,6 +14,7 @@ import type { TenantContext } from "@/lib/tenant-context";
 import { conflict, forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { recordMemberJoined, recordMembershipRemoved, recordRoleChanged } from "@/server/activity";
 import { queueMail, type MailStatus } from "@/server/mail";
+import { ensureClaudeMember } from "@/server/claude-bot";
 import { notifyMemberJoined } from "@/server/notifications";
 
 type Tx = Prisma.TransactionClient;
@@ -125,6 +126,7 @@ export async function createWorkspace(actor: { userId: string }, input: unknown)
       await tx.membership.create({
         data: { workspaceId: workspace.id, userId: actor.userId, role: "OWNER" },
       });
+      await ensureClaudeMember(tx, workspace.id);
       return workspace;
     });
   } catch (e) {

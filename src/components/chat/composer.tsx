@@ -142,6 +142,18 @@ export function ChatComposer({
         >
           <ImagePlus aria-hidden />
         </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={disabled || busy}
+          className="h-10 shrink-0 rounded-lg px-2 text-sm"
+          onClick={() => {
+            setValue((v) => (/@claude\b/i.test(v) ? v : `@Claude ${v}`));
+            ref.current?.focus();
+          }}
+        >
+          @Claude
+        </Button>
         <Textarea
           ref={ref}
           name="body"

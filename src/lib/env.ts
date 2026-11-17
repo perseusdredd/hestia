@@ -45,6 +45,8 @@ const shape = z.object({
   MAIL_FROM: optional,
   ENABLE_DEV_OUTBOX: optional,
   CRON_SECRET: optional,
+  ANTHROPIC_API_KEY: optional,
+  CLAUDE_MODEL: optional,
   HESTIA_SSO_SECRET: optional,
 });
 

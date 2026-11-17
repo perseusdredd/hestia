@@ -45,7 +45,7 @@ const providers: Provider[] = [
       if (!ipOk || !emailOk) throw new RateLimitedSignin();
 
       const user = await db.user.findUnique({ where: { email } });
-      if (!user?.passwordHash) {
+      if (!user?.passwordHash || user.id === "claude-bot") {
         await bcrypt.compare(password, DUMMY_HASH);
         return null;
       }

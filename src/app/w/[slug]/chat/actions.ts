@@ -1,9 +1,12 @@
 "use server";
 
+import { after } from "next/server";
+
 import { formString, toActionState, type ActionState } from "@/lib/action-state";
 import type { ChatMessageDTO } from "@/lib/pusher/chat-protocol";
 import { publishChatDeletion, publishChatMessage } from "@/lib/pusher/server";
 import { requireWorkspace } from "@/lib/tenant";
+import { answerMention, mentionsClaude } from "@/server/claude-bot";
 import { deleteMessage, sendChatMessage } from "@/server/chat";
 import { completeUpload, createChatImageUpload, type PendingUpload } from "@/server/files";
 
@@ -29,7 +32,10 @@ export async function sendChatMessageAction(
     const clientId = typeof input?.clientId === "string" && input.clientId !== "" ? input.clientId : undefined;
     const fileId = typeof input?.fileId === "string" && input.fileId !== "" ? input.fileId : undefined;
     const { message, created } = await sendChatMessage(ctx, { body: input?.body ?? "", clientId, fileId });
-    if (created) await publishChatMessage(ctx.workspaceId, message, clientId);
+    if (created) {
+      await publishChatMessage(ctx.workspaceId, message, clientId);
+      if (mentionsClaude(message.body)) after(() => answerMention(ctx.workspaceId, message.id, publishChatMessage));
+    }
     return { ok: true, data: message };
   } catch (e) {
     return toActionState<ChatMessageDTO>(e);
