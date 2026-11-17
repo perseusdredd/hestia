@@ -30,7 +30,12 @@ jobs:
         run: |
           install -m 700 -d ~/.ssh
           # Windows'tan yapıştırılınca eklenebilen CR karakterlerini temizle.
-          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          # Anahtar ya düz metin (-----BEGIN...) ya da tek satırlık base64 olabilir.
+          clean="$(printf '%s' "$DEPLOY_KEY" | tr -d '\r')"
+          case "$clean" in
+            -----BEGIN*) printf '%s\n' "$clean" > ~/.ssh/deploy_key ;;
+            *) printf '%s' "$clean" | tr -d ' \n' | base64 -d > ~/.ssh/deploy_key ;;
+          esac
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
           # Anahtar okunabiliyor mu? (Yanlış yapıştırılmışsa burada net bir hata görünür.)
