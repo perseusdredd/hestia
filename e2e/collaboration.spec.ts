@@ -307,3 +307,56 @@ test("invite link without e-mail: opens sign-up, joins automatically, works for 
   await d.page.goto(new URL(inviteUrl).pathname);
   await expect(d.page.getByText("Bu davet iptal edilmiş.")).toBeVisible();
 });
+
+// 1x1 transparent PNG
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+test("chat photo: pick, preview, send with a caption, shows in the feed, stays out of Files, deleted with its message", async ({
+  newActor,
+}, testInfo) => {
+  const a = await newActor("Fotograf");
+  const ws = await registerWithWorkspace(a);
+  const pa = a.page;
+  await nav(pa, "Sohbet");
+
+  // Unsupported files are refused in the browser, with a clear message.
+  const input = pa.locator('input[type="file"]');
+  await input.setInputFiles({ name: "not.txt", mimeType: "text/plain", buffer: Buffer.from("merhaba") });
+  await expect(pa.getByText("Yalnızca JPEG, PNG, WebP veya GIF fotoğraf gönderebilirsiniz.")).toBeVisible();
+
+  // A real photo: preview chip appears, caption is optional.
+  await input.setInputFiles({ name: "kedi.png", mimeType: "image/png", buffer: TINY_PNG });
+  await expect(pa.getByAltText("Seçilen fotoğraf")).toBeVisible();
+  await pa.getByRole("textbox", { name: "Mesaj" }).fill("Bakın, yeni logo");
+  await pa.getByRole("button", { name: "Gönder" }).click();
+
+  const feed = pa.getByRole("list", { name: "Mesajlar" });
+  const shown = feed.getByRole("img", { name: "kedi.png" });
+  await expect(shown).toBeVisible({ timeout: 20_000 });
+  await expect(feed.getByText("Bakın, yeni logo")).toBeVisible();
+  // The browser really decoded it (served by the access-checked route).
+  await expect.poll(() => shown.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect(pa.getByAltText("Seçilen fotoğraf")).toBeHidden();
+  await checkPage(pa, testInfo, "chat-photo");
+
+  // Survives a reload (it is stored, not just local state).
+  await pa.reload();
+  await expect(feed.getByRole("img", { name: "kedi.png" })).toBeVisible();
+
+  // Chat photos never appear in the Files browser.
+  await nav(pa, "Dosyalar");
+  await expect(pa.getByText("kedi.png")).toHaveCount(0);
+
+  // Deleting the message removes the photo too.
+  await nav(pa, "Sohbet");
+  const line = feed.locator("div").filter({ has: pa.getByText("Bakın, yeni logo", { exact: true }) }).last();
+  await line.hover();
+  await line.getByRole("button", { name: "Mesajı sil" }).click();
+  await pa.getByRole("dialog", { name: "Mesaj silinsin mi?" }).getByRole("button", { name: "Sil" }).click();
+  await expectToast(pa, "Mesaj silindi.");
+  await expect(feed.getByRole("img", { name: "kedi.png" })).toBeHidden();
+  void ws;
+});

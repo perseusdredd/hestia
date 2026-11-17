@@ -114,6 +114,8 @@ export type FeedItem = {
   /** Server id; null while the message is still being sent. */
   id: string | null;
   body: string;
+  /** Photo attached to a sent message. */
+  image?: { id: string; name: string };
   createdAt: Date;
   author: ChatAuthor;
   status: "sent" | "sending" | "failed";

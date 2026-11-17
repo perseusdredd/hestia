@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_TYPES } from "@/lib/pusher/chat-protocol";
 import { canModify, hasRole } from "@/lib/roles";
 import {
   decodeTextPreview,
@@ -217,6 +218,8 @@ export async function listFolderContents(ctx: TenantContext, folderId: string | 
   const folder = id ? await findFolder(db, ctx, id) : null;
   const breadcrumbs = id ? (await ancestorChain(db, ctx, id)).map(({ id, name }) => ({ id, name })) : [];
   const where = { workspaceId: ctx.workspaceId, ...(id ? { folderId: id } : { folderId: null }) };
+  // Chat photos are not part of the Files browser (documents have no such flag).
+  const fileWhere = { ...where, fromChat: false };
 
   const [folderRows, files, documents] = await Promise.all([
     db.folder.findMany({
@@ -229,7 +232,7 @@ export async function listFolderContents(ctx: TenantContext, folderId: string | 
       },
     }),
     db.file.findMany({
-      where,
+      where: fileWhere,
       orderBy: [{ name: "asc" }, { id: "asc" }],
       take: FOLDER_ITEMS_MAX + 1,
       include: { uploadedBy: userSelect },
@@ -298,7 +301,7 @@ export async function listRecentItems(ctx: TenantContext, opts: { take?: number 
   const take = Math.min(Math.max(opts.take ?? 6, 1), 50);
   const [files, documents] = await Promise.all([
     db.file.findMany({
-      where: { workspaceId: ctx.workspaceId },
+      where: { workspaceId: ctx.workspaceId, fromChat: false },
       orderBy: { createdAt: "desc" },
       take,
       select: {
@@ -530,7 +533,44 @@ export async function createPendingUpload(
 ): Promise<PendingUpload> {
   const data = parseInput(pendingUploadSchema, input);
   if (data.folderId) await findFolder(db, ctx, data.folderId);
+  return issueUpload(ctx, data, normalizeMimeType(data.type), false, storage);
+}
+
+const chatImageUploadSchema = z.object({
+  name: fileNameSchema,
+  size: z.coerce
+    .number()
+    .int("Geçersiz dosya boyutu.")
+    .min(1, "Geçersiz dosya boyutu.")
+    .max(CHAT_IMAGE_MAX_BYTES, "Fotoğraf en fazla 10 MB olabilir."),
+  type: z.string().max(255),
+});
+
+/**
+ * Upload step 1 for a chat photo: only previewable image types, at most
+ * 10 MB, never inside a folder. The resulting File is flagged fromChat and
+ * stays out of the Files browser, recents and search.
+ */
+export async function createChatImageUpload(
+  ctx: TenantContext,
+  input: unknown,
+  storage: StorageDriver = getStorage(),
+): Promise<PendingUpload> {
+  const data = parseInput(chatImageUploadSchema, input);
   const mimeType = normalizeMimeType(data.type);
+  if (!(CHAT_IMAGE_TYPES as readonly string[]).includes(mimeType)) {
+    throw new ServiceError("VALIDATION", "Yalnızca JPEG, PNG, WebP veya GIF fotoğraf gönderebilirsiniz.");
+  }
+  return issueUpload(ctx, { name: data.name, size: data.size, folderId: null }, mimeType, true, storage);
+}
+
+async function issueUpload(
+  ctx: TenantContext,
+  data: { name: string; size: number; folderId: string | null },
+  mimeType: string,
+  chat: boolean,
+  storage: StorageDriver,
+): Promise<PendingUpload> {
   const key = generateStorageKey(ctx.workspaceId, data.name);
   const token = signUploadToken({
     k: key,
@@ -541,6 +581,7 @@ export async function createPendingUpload(
     s: data.size,
     t: mimeType,
     e: Date.now() + UPLOAD_TOKEN_TTL_MS,
+    ...(chat ? { c: true } : {}),
   });
   const target = await storage.createUploadTarget(key, {
     contentType: mimeType,
@@ -631,16 +672,20 @@ export async function completeUpload(
           mimeType: p.t,
           size: head.size,
           storageKey: p.k,
+          fromChat: p.c === true,
         },
       });
     });
     // Only a fresh completion records (retries return above); never throws.
-    await recordActivity(ctx, {
-      type: "FILE_UPLOADED",
-      title: file.name,
-      path: folderActivityPath(file.folderId),
-      subject: { type: "file", id: file.id },
-    });
+    // Chat photos are not "files uploaded": the chat message is their only home.
+    if (!file.fromChat) {
+      await recordActivity(ctx, {
+        type: "FILE_UPLOADED",
+        title: file.name,
+        path: folderActivityPath(file.folderId),
+        subject: { type: "file", id: file.id },
+      });
+    }
     return file;
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {

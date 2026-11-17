@@ -283,11 +283,14 @@ model File {
   size         Int
   // Object key in the storage backend (R2 / local). Always prefixed with the workspaceId.
   storageKey   String   @unique
+  // A photo attached to a chat message: kept out of the Files browser, recents and search.
+  fromChat     Boolean  @default(false)
   createdAt    DateTime @default(now())
 
-  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  folder     Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  uploadedBy User      @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folder      Folder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedBy  User         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  chatMessage ChatMessage?
 
   @@index([workspaceId, folderId])
 }
@@ -341,10 +344,13 @@ model ChatMessage {
   body        String   @db.Text
   // Client-generated id; makes a retried send idempotent.
   clientId    String?
+  // Optional photo (a File with fromChat = true); one photo per message.
+  fileId      String?  @unique
   createdAt   DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  file      File?     @relation(fields: [fileId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, authorId, clientId])
   @@index([workspaceId, createdAt])

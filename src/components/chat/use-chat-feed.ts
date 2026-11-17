@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { sendChatMessageAction } from "@/app/w/[slug]/chat/actions";
+import {
+  completeChatImageUploadAction,
+  sendChatMessageAction,
+  startChatImageUploadAction,
+} from "@/app/w/[slug]/chat/actions";
 import {
   collectAfter,
   dropDeleted,
@@ -317,6 +321,41 @@ export function useChatFeed({
     setPending((p) => p.filter((x) => x.clientId !== clientId));
   }, []);
 
+  const [sendingImage, setSendingImage] = useState(false);
+
+  /**
+   * Photo send: upload (start, PUT, complete), then post a message that
+   * references the stored file. Not optimistic: the caller shows progress and
+   * keeps the picked photo until this resolves.
+   */
+  const sendImage = useCallback(
+    async (file: File, caption: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      setSendingImage(true);
+      try {
+        const started = await startChatImageUploadAction(slug, { name: file.name, size: file.size, type: file.type });
+        if (!started.ok || !started.data) return { ok: false, error: started.error ?? "Fotoğraf yüklenemedi." };
+        const target = started.data;
+        const put = await fetch(target.url, { method: target.method, headers: target.headers, body: file });
+        if (!put.ok) return { ok: false, error: "Fotoğraf yüklenemedi. Lütfen tekrar deneyin." };
+        const done = await completeChatImageUploadAction(slug, target.token);
+        if (!done.ok || !done.data) return { ok: false, error: done.error ?? "Fotoğraf yüklenemedi." };
+        const clientId = newClientId();
+        const res = await sendChatMessageAction(slug, { body: caption, clientId, fileId: done.data.id });
+        if (res.ok && res.data) {
+          confirmedClientIds.current.add(clientId);
+          settle(res.data, clientId);
+          return { ok: true };
+        }
+        return { ok: false, error: res.error ?? "Mesaj gönderilemedi." };
+      } catch {
+        return { ok: false, error: "Bağlantı sorunu nedeniyle gönderilemedi." };
+      } finally {
+        setSendingImage(false);
+      }
+    },
+    [slug, settle],
+  );
+
   return useMemo(
     () => ({
       messages,
@@ -328,10 +367,12 @@ export function useChatFeed({
       transportKind,
       loadOlder,
       send,
+      sendImage,
+      sendingImage,
       retry,
       discard,
       remove,
     }),
-    [messages, pending, hasMore, loadingOlder, olderError, problem, transportKind, loadOlder, send, retry, discard, remove],
+    [messages, pending, hasMore, loadingOlder, olderError, problem, transportKind, loadOlder, send, sendImage, sendingImage, retry, discard, remove],
   );
 }

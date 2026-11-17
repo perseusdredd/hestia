@@ -6,6 +6,10 @@
 export const CHAT_PAGE_SIZE = 50;
 export const CHAT_MAX_BODY = 4000;
 
+/** Photos in chat: types the browser can preview safely, and the size cap. */
+export const CHAT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"] as const;
+export const CHAT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
 export type ChatAuthor = {
   id: string;
   name: string | null;
@@ -13,9 +17,13 @@ export type ChatAuthor = {
   image: string | null;
 };
 
+export type ChatImage = { id: string; name: string; size: number };
+
 export type ChatMessageDTO = {
   id: string;
   body: string;
+  /** Optional photo (served by /api/files/<id>/inline). */
+  image?: ChatImage;
   /** ISO timestamp (millisecond precision, same as the DB column). */
   createdAt: string;
   authorId: string;

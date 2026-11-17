@@ -23,6 +23,8 @@ export type UploadTokenPayload = {
   t: string;
   /** expiry, ms since epoch */
   e: number;
+  /** true for a chat photo: the File is hidden from the Files browser */
+  c?: boolean;
 };
 
 /** Short on purpose: a token is not marked as used, so it stays replayable until it expires. */
@@ -67,7 +69,8 @@ export function verifyUploadToken(token: unknown, now = Date.now()): UploadToken
       typeof p.n !== "string" ||
       typeof p.s !== "number" ||
       typeof p.t !== "string" ||
-      typeof p.e !== "number"
+      typeof p.e !== "number" ||
+      (p.c !== undefined && typeof p.c !== "boolean")
     ) {
       return null;
     }

@@ -14,6 +14,8 @@ import {
 import { canModify } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
+import type { StorageDriver } from "@/lib/storage";
+import { deleteFile } from "@/server/files";
 
 /**
  * Workspace chat ("Sohbet"): one room per workspace.
@@ -31,6 +33,7 @@ const messageSelect = {
   authorId: true,
   clientId: true,
   author: { select: authorSelect },
+  file: { select: { id: true, name: true, size: true } },
 } satisfies Prisma.ChatMessageSelect;
 
 type MessageRow = Prisma.ChatMessageGetPayload<{ select: typeof messageSelect }>;
@@ -43,6 +46,7 @@ function toDTO(ctx: TenantContext, row: MessageRow): ChatMessageDTO {
   return {
     id: row.id,
     body: row.body,
+    ...(row.file ? { image: { id: row.file.id, name: row.file.name, size: row.file.size } } : {}),
     createdAt: row.createdAt.toISOString(),
     authorId: row.authorId,
     author: row.author,
@@ -191,25 +195,41 @@ export async function getMessage(ctx: TenantContext, id: string): Promise<ChatMe
  */
 export const CHAT_CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
-const createSchema = z.object({
+const createSchema = z
+  .object({
+  // May be empty when a photo is attached (checked below).
   body: z
     .string({ error: "Mesaj boş olamaz." })
     .trim()
-    .min(1, { error: "Mesaj boş olamaz." })
     .max(CHAT_MAX_BODY, { error: `Mesaj en fazla ${CHAT_MAX_BODY} karakter olabilir.` }),
+  fileId: z.string().min(1).max(64).optional(),
   clientId: z
     .string({ error: "Geçersiz mesaj kimliği." })
     .regex(CHAT_CLIENT_ID_PATTERN, { error: "Geçersiz mesaj kimliği." })
     .optional(),
-});
+  })
+  .refine((v) => v.body.length > 0 || v.fileId, { error: "Mesaj boş olamaz.", path: ["body"] });
 
-type CreateInput = { body: unknown; clientId?: unknown };
+type CreateInput = { body: unknown; clientId?: unknown; fileId?: unknown };
 
 /** Result of an idempotent send: `created` is false when a retry hit an existing row. */
 export type SendResult = { message: ChatMessageDTO; created: boolean };
 
 function isUniqueViolation(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+}
+
+/**
+ * A message may only carry a photo this same user uploaded for chat in this
+ * workspace (File.fromChat) that no other message uses yet.
+ */
+async function assertOwnChatPhoto(client: Client, ctx: TenantContext, fileId: string): Promise<void> {
+  const file = await client.file.findFirst({
+    where: { id: fileId, workspaceId: ctx.workspaceId, uploadedById: ctx.userId, fromChat: true },
+    select: { id: true, chatMessage: { select: { id: true } } },
+  });
+  if (!file) throw new ServiceError("VALIDATION", "Fotoğraf bulunamadı. Lütfen yeniden yükleyin.");
+  if (file.chatMessage) throw new ServiceError("CONFLICT", "Bu fotoğraf zaten bir mesajda kullanıldı.");
 }
 
 /**
@@ -223,13 +243,14 @@ async function findByClientId(
   ctx: TenantContext,
   clientId: string,
   body: string,
+  fileId?: string,
 ): Promise<ChatMessageDTO | null> {
   const row = await client.chatMessage.findFirst({
     where: { workspaceId: ctx.workspaceId, authorId: ctx.userId, clientId },
     select: messageSelect,
   });
   if (!row) return null;
-  if (row.body !== body) {
+  if (row.body !== body || (row.file?.id ?? undefined) !== fileId) {
     throw new ServiceError("CONFLICT", "Bu mesaj kimliği farklı bir mesaj için zaten kullanıldı.");
   }
   return toDTO(ctx, row);
@@ -246,22 +267,29 @@ export async function createMessage(ctx: TenantContext, input: CreateInput): Pro
 
 /** createMessage plus whether a row was actually inserted. */
 export async function createMessageIdempotent(ctx: TenantContext, input: CreateInput): Promise<SendResult> {
-  const { body, clientId } = parseInput(createSchema, input);
+  const { body, clientId, fileId } = parseInput(createSchema, input);
   const actor = await loadActor(ctx);
   if (clientId) {
-    const existing = await findByClientId(db, ctx, clientId, body);
+    const existing = await findByClientId(db, ctx, clientId, body, fileId);
     if (existing) return { message: existing, created: false };
   }
   try {
+    if (fileId) await assertOwnChatPhoto(db, ctx, fileId);
     const row = await db.chatMessage.create({
-      data: { workspaceId: ctx.workspaceId, authorId: actor.userId, body, clientId: clientId ?? null },
+      data: {
+        workspaceId: ctx.workspaceId,
+        authorId: actor.userId,
+        body,
+        clientId: clientId ?? null,
+        fileId: fileId ?? null,
+      },
       select: messageSelect,
     });
     return { message: toDTO(ctx, row), created: true };
   } catch (e) {
     // A concurrent retry inserted the same clientId first: return its row.
     if (clientId && isUniqueViolation(e)) {
-      const existing = await findByClientId(db, ctx, clientId, body);
+      const existing = await findByClientId(db, ctx, clientId, body, fileId);
       if (existing) return { message: existing, created: false };
     }
     throw e;
@@ -314,7 +342,7 @@ export async function sendRateLimitedMessage(ctx: TenantContext, input: CreateIn
  * (workspaceId, authorId, clientId) is the backstop if anything bypasses it.
  */
 export async function sendChatMessage(ctx: TenantContext, input: CreateInput): Promise<SendResult> {
-  const { body, clientId } = parseInput(createSchema, input);
+  const { body, clientId, fileId } = parseInput(createSchema, input);
   try {
     return await db.$transaction(async (tx): Promise<SendResult> => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"hestia:chat-rate:" + ctx.workspaceId + ":" + ctx.userId}))`;
@@ -324,12 +352,19 @@ export async function sendChatMessage(ctx: TenantContext, input: CreateInput): P
       });
       if (!actor) throw notFound("Çalışma alanı bulunamadı.");
       if (clientId) {
-        const existing = await findByClientId(tx, ctx, clientId, body);
+        const existing = await findByClientId(tx, ctx, clientId, body, fileId);
         if (existing) return { message: existing, created: false };
       }
       await assertChatRateLimit(ctx, new Date(), tx);
+      if (fileId) await assertOwnChatPhoto(tx, ctx, fileId);
       const row = await tx.chatMessage.create({
-        data: { workspaceId: ctx.workspaceId, authorId: actor.userId, body, clientId: clientId ?? null },
+        data: {
+          workspaceId: ctx.workspaceId,
+          authorId: actor.userId,
+          body,
+          clientId: clientId ?? null,
+          fileId: fileId ?? null,
+        },
         select: messageSelect,
       });
       return { message: toDTO(ctx, row), created: true };
@@ -338,7 +373,7 @@ export async function sendChatMessage(ctx: TenantContext, input: CreateInput): P
     // The failed insert aborted the transaction; read the winner outside it.
     if (clientId && isUniqueViolation(e)) {
       await loadActor(ctx);
-      const existing = await findByClientId(db, ctx, clientId, body);
+      const existing = await findByClientId(db, ctx, clientId, body, fileId);
       if (existing) return { message: existing, created: false };
     }
     throw e;
@@ -346,12 +381,16 @@ export async function sendChatMessage(ctx: TenantContext, input: CreateInput): P
 }
 
 /** Authors delete their own messages; ADMIN/OWNER delete any. */
-export async function deleteMessage(ctx: TenantContext, id: string): Promise<{ id: string }> {
+export async function deleteMessage(
+  ctx: TenantContext,
+  id: string,
+  storage?: StorageDriver,
+): Promise<{ id: string }> {
   if (typeof id !== "string" || id.length === 0 || id.length > 64) throw notFound("Mesaj bulunamadı.");
   const actor = await loadActor(ctx);
   const msg = await db.chatMessage.findFirst({
     where: { id, workspaceId: ctx.workspaceId },
-    select: { id: true, authorId: true },
+    select: { id: true, authorId: true, fileId: true },
   });
   if (!msg) throw notFound("Mesaj bulunamadı.");
   if (!canModify({ userId: actor.userId, role: actor.role }, msg.authorId)) {
@@ -360,6 +399,14 @@ export async function deleteMessage(ctx: TenantContext, id: string): Promise<{ i
   // Scoped again by workspaceId so the write can never touch another tenant.
   const res = await db.chatMessage.deleteMany({ where: { id: msg.id, workspaceId: ctx.workspaceId } });
   if (res.count === 0) throw notFound("Mesaj bulunamadı.");
+  // The photo goes with its message (row + stored bytes). Never fails the delete.
+  if (msg.fileId) {
+    try {
+      await deleteFile(ctx, msg.fileId, storage);
+    } catch (e) {
+      console.error("[chat] could not delete message photo:", e instanceof Error ? e.message : e);
+    }
+  }
   return { id: msg.id };
 }
 

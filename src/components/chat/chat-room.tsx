@@ -63,6 +63,7 @@ export function ChatRoom({
       key: m.id,
       id: m.id,
       body: m.body,
+      image: m.image ? { id: m.image.id, name: m.image.name } : undefined,
       createdAt: new Date(m.createdAt),
       author: m.author,
       status: "sent",
@@ -167,6 +168,10 @@ export function ChatRoom({
 
   const isAdmin = hasRole(me.role, "ADMIN");
   const canDelete = useCallback((item: FeedItem) => isAdmin || item.author.id === me.id, [isAdmin, me.id]);
+  // A photo that finishes loading grows the list: keep the newest message in view.
+  const onImageLoad = useCallback(() => {
+    if (atBottomRef.current) scrollToBottom();
+  }, [scrollToBottom]);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
 
   const empty = items.length === 0;
@@ -219,6 +224,7 @@ export function ChatRoom({
             <MessageFeed
               rows={rows}
               canDelete={canDelete}
+              onImageLoad={onImageLoad}
               onDelete={setDeleteTarget}
               onRetry={feed.retry}
               onDiscard={feed.discard}
@@ -249,6 +255,8 @@ export function ChatRoom({
 
       <ChatComposer
         onSend={feed.send}
+        onSendImage={feed.sendImage}
+        sendingImage={feed.sendingImage}
         disabled={feed.problem === "signed-out" || feed.problem === "no-access"}
       />
 
@@ -257,7 +265,7 @@ export function ChatRoom({
           key={deleteTarget.id}
           slug={slug}
           messageId={deleteTarget.id}
-          preview={deleteTarget.body}
+          preview={deleteTarget.body || "Fotoğraf"}
           onClose={closeDelete}
           onDeleted={feed.remove}
         />

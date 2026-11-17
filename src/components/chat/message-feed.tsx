@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 
 type Handlers = {
   canDelete: (item: FeedItem) => boolean;
+  onImageLoad: () => void;
   onDelete: (item: FeedItem) => void;
   onRetry: (clientId: string) => void;
   onDiscard: (clientId: string) => void;
@@ -68,6 +69,8 @@ function sameLine(a: LineProps, b: LineProps): boolean {
     x.key === y.key &&
     x.id === y.id &&
     x.body === y.body &&
+    x.image?.id === y.image?.id &&
+    a.onImageLoad === b.onImageLoad &&
     x.status === y.status &&
     x.error === y.error &&
     x.clientId === y.clientId &&
@@ -80,7 +83,7 @@ function sameLine(a: LineProps, b: LineProps): boolean {
   );
 }
 
-const MessageLine = memo(function MessageLine({ item, canDelete, onDelete, onRetry, onDiscard }: LineProps) {
+const MessageLine = memo(function MessageLine({ item, canDelete, onImageLoad, onDelete, onRetry, onDiscard }: LineProps) {
   const deletable = item.status === "sent" && canDelete(item);
   return (
     <div
@@ -89,15 +92,36 @@ const MessageLine = memo(function MessageLine({ item, canDelete, onDelete, onRet
         deletable && "pr-9 pointer-coarse:pr-12",
       )}
     >
-      <p
-        className={cn(
-          "text-sm leading-relaxed break-words whitespace-pre-wrap",
-          item.status === "sending" && "text-muted-foreground",
-        )}
-        title={formatDateTime(item.createdAt)}
-      >
-        <LinkifiedText text={item.body} />
-      </p>
+      {item.body ? (
+        <p
+          className={cn(
+            "text-sm leading-relaxed break-words whitespace-pre-wrap",
+            item.status === "sending" && "text-muted-foreground",
+          )}
+          title={formatDateTime(item.createdAt)}
+        >
+          <LinkifiedText text={item.body} />
+        </p>
+      ) : null}
+
+      {item.image ? (
+        <a
+          href={`/api/files/${item.image.id}/inline`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 block w-fit max-w-full rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          aria-label={`Fotoğrafı büyük aç: ${item.image.name}`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- served by our own access-checked route */}
+          <img
+            src={`/api/files/${item.image.id}/inline`}
+            alt={item.image.name}
+            loading="lazy"
+            onLoad={onImageLoad}
+            className="max-h-72 w-auto max-w-full rounded-lg border bg-muted object-contain sm:max-w-sm"
+          />
+        </a>
+      ) : null}
 
       {item.status === "sending" ? (
         <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">

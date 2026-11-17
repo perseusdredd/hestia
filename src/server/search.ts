@@ -383,6 +383,7 @@ export async function searchWorkspace(
       const rows = await db.file.findMany({
         where: {
           workspaceId,
+          fromChat: false,
           OR: anyFieldContains<Prisma.FileWhereInput>(["name"], variants),
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
