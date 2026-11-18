@@ -1,5 +1,6 @@
 import {
   Activity,
+  BarChart3,
   Bookmark,
   CalendarDays,
   CheckSquare,
@@ -15,7 +16,7 @@ import {
 
 export type NavItem = {
   /** Path segment under /w/[slug]; "" is the overview. */
-  segment: "" | "my" | "bookmarks" | "messages" | "todos" | "files" | "calendar" | "chat" | "activity" | "trash" | "settings";
+  segment: "" | "my" | "reports" | "bookmarks" | "messages" | "todos" | "files" | "calendar" | "chat" | "activity" | "trash" | "settings";
   label: string;
   icon: LucideIcon;
 };
@@ -24,6 +25,7 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { segment: "", label: "Genel bakış", icon: House },
   { segment: "my", label: "Benim İşlerim", icon: UserRound },
+  { segment: "reports", label: "Raporlar", icon: BarChart3 },
   { segment: "bookmarks", label: "Yer imlerim", icon: Bookmark },
   { segment: "messages", label: "Mesajlar", icon: MessageSquare },
   { segment: "todos", label: "Yapılacaklar", icon: CheckSquare },
