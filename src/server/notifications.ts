@@ -32,6 +32,8 @@ export const NOTIFICATION_TYPES = [
   "MEMBER_JOINED",
   /** A direct message in the chat. */
   "CHAT_DM",
+  /** A scheduled automatic check-in question. */
+  "CHECKIN",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

@@ -10,4 +10,5 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   EVENT_CREATED: "Yeni etkinlik eklendiğinde",
   MEMBER_JOINED: "Yeni üye katıldığında (yöneticiler)",
   CHAT_DM: "Doğrudan mesaj geldiğinde",
+  CHECKIN: "Otomatik kontrol sorusu sorulduğunda",
 };

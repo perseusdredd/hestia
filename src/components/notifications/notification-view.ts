@@ -1,6 +1,7 @@
 import {
   AtSign,
   Bell,
+  CalendarClock,
   CalendarDays,
   CheckSquare,
   MessageCircle,
@@ -46,6 +47,7 @@ const ICONS: Record<string, LucideIcon> = {
   EVENT_CREATED: CalendarDays,
   MEMBER_JOINED: UserPlus,
   CHAT_DM: MessageSquare,
+  CHECKIN: CalendarClock,
 };
 
 export function notificationIcon(type: string): LucideIcon {
