@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, CalendarClock, MapPin } from "lucide-react";
 
 import { CommentThread } from "@/components/comments/comment-thread";
+import { BookmarkToggle } from "@/components/bookmarks/bookmark-toggle";
 import { SubscribeToggle } from "@/components/subscriptions/subscribe-toggle";
 import { RichText } from "@/components/linkified-text";
 import { PageHeader } from "@/components/page-header";
@@ -16,6 +17,7 @@ import { istanbulDayKey } from "@/lib/istanbul-time";
 import { requireWorkspace } from "@/lib/tenant";
 import { getEvent } from "@/server/calendar";
 import { isServiceError } from "@/server/errors";
+import { isBookmarked } from "@/server/bookmarks";
 import { isSubscribed, countSubscribers } from "@/server/subscriptions";
 import { listMemberUsers } from "@/server/workspaces";
 
@@ -43,10 +45,11 @@ export default async function EventPage({ params }: { params: Params }) {
   const { slug, eventId } = await params;
   const { ctx, event } = await load(slug, eventId);
   const subject = { type: "event" as const, id: event.id };
-  const [members, subscribed, subscribers] = await Promise.all([
+  const [members, subscribed, subscribers, bookmarked] = await Promise.all([
     listMemberUsers(ctx),
     isSubscribed(ctx, subject),
     countSubscribers(ctx, subject),
+    isBookmarked(ctx, subject),
   ]);
   const creator = members.find((m) => m.id === event.createdById) ?? null;
   const dayKey = istanbulDayKey(event.startsAt);
@@ -101,7 +104,10 @@ export default async function EventPage({ params }: { params: Params }) {
           </CardContent>
         </Card>
 
-        <SubscribeToggle slug={slug} subject={subject} subscribed={subscribed} count={subscribers} />
+        <div className="flex flex-wrap items-center gap-3">
+          <BookmarkToggle slug={slug} subject={subject} bookmarked={bookmarked} />
+          <SubscribeToggle slug={slug} subject={subject} subscribed={subscribed} count={subscribers} />
+        </div>
 
         <p className="text-sm text-muted-foreground">
           Etkinliği düzenlemek için{" "}

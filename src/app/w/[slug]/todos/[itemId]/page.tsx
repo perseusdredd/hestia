@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, CalendarDays, CheckCircle2, Circle, ListTodo, UserRound } from "lucide-react";
 
 import { CommentThread } from "@/components/comments/comment-thread";
+import { BookmarkToggle } from "@/components/bookmarks/bookmark-toggle";
 import { SubscribeToggle } from "@/components/subscriptions/subscribe-toggle";
 import { RichText } from "@/components/linkified-text";
 import { PageHeader } from "@/components/page-header";
@@ -15,6 +16,7 @@ import { formatDueDate, todayDateOnly } from "@/lib/date-only";
 import { formatDateTime } from "@/lib/format";
 import { requireWorkspace } from "@/lib/tenant";
 import { getTodoItemDetail } from "@/server/todos";
+import { isBookmarked } from "@/server/bookmarks";
 import { isSubscribed, countSubscribers } from "@/server/subscriptions";
 import { isServiceError } from "@/server/errors";
 
@@ -41,7 +43,11 @@ export default async function TodoItemPage({ params }: { params: Params }) {
   const { slug, itemId } = await params;
   const { ctx, item } = await load(slug, itemId);
   const subject = { type: "todo" as const, id: item.id };
-  const [subscribed, subscribers] = await Promise.all([isSubscribed(ctx, subject), countSubscribers(ctx, subject)]);
+  const [subscribed, subscribers, bookmarked] = await Promise.all([
+    isSubscribed(ctx, subject),
+    countSubscribers(ctx, subject),
+    isBookmarked(ctx, subject),
+  ]);
   const overdue = !item.done && item.dueDate !== null && item.dueDate < todayDateOnly();
 
   return (
@@ -145,7 +151,10 @@ export default async function TodoItemPage({ params }: { params: Params }) {
           </CardContent>
         </Card>
 
-        <SubscribeToggle slug={slug} subject={subject} subscribed={subscribed} count={subscribers} />
+        <div className="flex flex-wrap items-center gap-3">
+          <BookmarkToggle slug={slug} subject={subject} bookmarked={bookmarked} />
+          <SubscribeToggle slug={slug} subject={subject} subscribed={subscribed} count={subscribers} />
+        </div>
 
         <p className="text-sm text-muted-foreground">
           Görevi düzenlemek veya tamamlamak için{" "}

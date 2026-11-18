@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Pin } from "lucide-react";
 
 import { CommentThread } from "@/components/comments/comment-thread";
+import { BookmarkToggle } from "@/components/bookmarks/bookmark-toggle";
 import { SubscribeToggle } from "@/components/subscriptions/subscribe-toggle";
 import { PostControls } from "@/components/messages/post-controls";
 import { Markdown } from "@/components/markdown";
@@ -20,6 +21,7 @@ import { listMentionCandidates, mentionNames } from "@/server/comments";
 import { listCategories } from "@/server/message-categories";
 import { getPostHeader } from "@/server/messages";
 import { listReactions, REACTION_EMOJIS } from "@/server/reactions";
+import { isBookmarked } from "@/server/bookmarks";
 import { isSubscribed, countSubscribers } from "@/server/subscriptions";
 
 export const metadata: Metadata = { title: "Mesaj" };
@@ -42,12 +44,13 @@ export default async function PostPage({
   }
 
   const subject = { type: "post" as const, id: post.id };
-  const [members, categories, names, subscribed, subscribers, reactions] = await Promise.all([
+  const [members, categories, names, subscribed, subscribers, bookmarked, reactions] = await Promise.all([
     listMentionCandidates(ctx),
     listCategories(ctx),
     mentionNames(ctx, [post.body]),
     isSubscribed(ctx, subject),
     countSubscribers(ctx, subject),
+    isBookmarked(ctx, subject),
     listReactions(ctx, "post", [post.id]),
   ]);
   const isDraft = post.publishedAt === null;
@@ -118,7 +121,10 @@ export default async function PostPage({
           allowed={REACTION_EMOJIS}
         />
 
-        <SubscribeToggle slug={slug} subject={subject} subscribed={subscribed} count={subscribers} />
+        <div className="flex flex-wrap items-center gap-3">
+          <BookmarkToggle slug={slug} subject={subject} bookmarked={bookmarked} />
+          <SubscribeToggle slug={slug} subject={subject} subscribed={subscribed} count={subscribers} />
+        </div>
       </article>
 
       <CommentThread slug={slug} ctx={ctx} subject={{ type: "post", id: post.id }} />

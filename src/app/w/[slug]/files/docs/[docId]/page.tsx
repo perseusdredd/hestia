@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Pencil, Trash2 } from "lucide-react";
 
+import { BookmarkToggle } from "@/components/bookmarks/bookmark-toggle";
 import { CommentThread } from "@/components/comments/comment-thread";
 import { ConfirmAction } from "@/components/confirm-action";
 import { FilesBreadcrumbs } from "@/components/files/breadcrumbs";
@@ -14,6 +15,7 @@ import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDateTime, formatRelative } from "@/lib/format";
 import { canModify } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
+import { isBookmarked } from "@/server/bookmarks";
 import { getDocument } from "@/server/files";
 
 import { deleteDocumentAction } from "../../actions";
@@ -33,6 +35,7 @@ export default async function DocumentPage({ params }: { params: Params }) {
   const { slug, docId } = await params;
   const { ctx } = await requireWorkspace(slug);
   const { document, breadcrumbs } = await orNotFound(() => getDocument(ctx, docId));
+  const bookmarked = await isBookmarked(ctx, { type: "document", id: document.id });
   const editable = canModify(ctx, document.authorId);
   const edited = document.updatedAt.getTime() - document.createdAt.getTime() > 1000;
 
@@ -97,6 +100,7 @@ export default async function DocumentPage({ params }: { params: Params }) {
           description={editable ? "Düzenle düğmesiyle içerik ekleyebilirsiniz." : undefined}
         />
       )}
+      <BookmarkToggle slug={slug} subject={{ type: "document", id: document.id }} bookmarked={bookmarked} />
       <CommentThread slug={slug} ctx={ctx} subject={{ type: "document", id: document.id }} />
     </div>
   );
