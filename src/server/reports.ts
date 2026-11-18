@@ -66,7 +66,7 @@ export async function getReports(ctx: TenantContext, opts: { today?: string; now
   });
   const overdueWhere = { ...open, dueDate: { lt: dateOnlyToDb(today) } };
 
-  const [overdueRows, overdueTotal, dueRows, events, members, counts] = await Promise.all([
+  const [overdueRows, overdueTotal, dueRows, events, members, counts, extraCounts] = await Promise.all([
     db.todoItem.findMany({
       where: overdueWhere,
       orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
@@ -86,9 +86,16 @@ export async function getReports(ctx: TenantContext, opts: { today?: string; now
       include: { user: { select: { name: true } } },
     }),
     db.todoItem.groupBy({ by: ["assigneeId"], where: { ...open, assigneeId: { not: null } }, _count: { _all: true } }),
+    db.todoAssignee.groupBy({
+      by: ["userId"],
+      where: { workspaceId: ctx.workspaceId, todoItem: open },
+      _count: { _all: true },
+    }),
   ]);
 
-  const countById = new Map(counts.map((c) => [c.assigneeId, c._count._all]));
+  const countById = new Map<string | null, number>(counts.map((c) => [c.assigneeId, c._count._all]));
+  // Additional assignees (TodoAssignee) share the workload too.
+  for (const c of extraCounts) countById.set(c.userId, (countById.get(c.userId) ?? 0) + c._count._all);
   const workload = members
     .map((m) => ({ userId: m.userId, name: m.user.name ?? "Üye", openCount: countById.get(m.userId) ?? 0 }))
     .sort((a, b) => b.openCount - a.openCount || a.name.localeCompare(b.name, "tr"));

@@ -43,6 +43,15 @@ const dueDateSchema = z.preprocess(
   z.string().refine(isDateOnly, "Geçerli bir tarih girin.").nullable(),
 );
 
+const startDateSchema = dueDateSchema;
+const sectionIdSchema = z.preprocess(emptyToNull, z.string().min(1).max(64).nullable());
+const extraAssigneesSchema = z.array(z.string().min(1).max(64)).max(50, "En fazla 50 kişi atanabilir.");
+const sectionNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Bölüm adı gerekli.")
+  .max(120, "Bölüm adı en fazla 120 karakter olabilir.");
+
 const createListSchema = z.object({
   name: listNameSchema,
   description: listDescriptionSchema.optional(),
@@ -56,12 +65,18 @@ const createItemSchema = z.object({
   notes: notesSchema.optional(),
   assigneeId: assigneeSchema.optional(),
   dueDate: dueDateSchema.optional(),
+  startOn: startDateSchema.optional(),
+  sectionId: sectionIdSchema.optional(),
+  extraAssigneeIds: extraAssigneesSchema.optional(),
 });
 const updateItemSchema = z.object({
   title: titleSchema.optional(),
   notes: notesSchema.optional(),
   assigneeId: assigneeSchema.optional(),
   dueDate: dueDateSchema.optional(),
+  startOn: startDateSchema.optional(),
+  sectionId: sectionIdSchema.optional(),
+  extraAssigneeIds: extraAssigneesSchema.optional(),
 });
 
 export type TodoUser = { id: string; name: string | null; email: string; image: string | null };
@@ -76,8 +91,14 @@ export type TodoItemDTO = {
   completedAt: string | null;
   assigneeId: string | null;
   assignee: TodoUser | null;
+  /** Additional assignees besides the primary one. */
+  extraAssignees: TodoUser[];
+  startOn: string | null; // yyyy-MM-dd, no timezone
+  sectionId: string | null;
   canEdit: boolean;
 };
+
+export type TodoSectionDTO = { id: string; name: string; position: number };
 
 export type TodoListDTO = {
   id: string;
@@ -91,6 +112,7 @@ export type TodoListDTO = {
   doneCount: number;
   /** Completed items not loaded (beyond DONE_ITEMS_PER_LIST); not counted as filtered out. */
   hiddenDone: number;
+  sections: TodoSectionDTO[];
   items: TodoItemDTO[];
 };
 
@@ -107,6 +129,9 @@ type ItemRow = {
   assigneeId: string | null;
   createdById: string;
   assignee: TodoUser | null;
+  startOn?: Date | null;
+  sectionId?: string | null;
+  extraAssignees?: { user: TodoUser }[];
 };
 
 function toItemDTO(ctx: TenantContext, i: ItemRow): TodoItemDTO {
@@ -120,8 +145,41 @@ function toItemDTO(ctx: TenantContext, i: ItemRow): TodoItemDTO {
     completedAt: i.completedAt ? i.completedAt.toISOString() : null,
     assigneeId: i.assigneeId,
     assignee: i.assignee,
+    extraAssignees: (i.extraAssignees ?? []).map((e) => e.user),
+    startOn: i.startOn ? dbToDateOnly(i.startOn) : null,
+    sectionId: i.sectionId ?? null,
     canEdit: canModify(ctx, i.createdById),
   };
+}
+
+const extraAssigneesInclude = {
+  extraAssignees: { orderBy: { createdAt: "asc" as const }, select: { user: { select: userSelect } } },
+} as const;
+
+/** Every extra assignee must be a member of this workspace. */
+async function requireExtraAssignees(ctx: TenantContext, ids: string[]) {
+  for (const id of ids) {
+    if (!(await isWorkspaceMember(ctx, id))) {
+      throw new ServiceError("VALIDATION", "Atanan kişi bu çalışma alanının üyesi olmalı.", {
+        extraAssigneeIds: ["Atanan kişi bu çalışma alanının üyesi olmalı."],
+      });
+    }
+  }
+}
+
+/** Unique extra assignee ids, without the primary assignee. */
+function cleanExtras(ids: string[], primary: string | null | undefined): string[] {
+  return [...new Set(ids)].filter((id) => id !== primary);
+}
+
+async function requireSection(ctx: TenantContext, listId: string, sectionId: string | null | undefined) {
+  if (!sectionId) return;
+  const section = await db.todoSection.findFirst({ where: { id: sectionId, listId, workspaceId: ctx.workspaceId } });
+  if (!section) {
+    throw new ServiceError("VALIDATION", "Bölüm bu listeye ait olmalı.", {
+      sectionId: ["Bölüm bu listeye ait olmalı."],
+    });
+  }
 }
 
 async function requireAssignee(ctx: TenantContext, assigneeId: string | null | undefined) {
@@ -151,8 +209,8 @@ export async function listTodoLists(
   opts: { assignedToMe?: boolean } = {},
 ): Promise<TodoListDTO[]> {
   const order = [{ position: "asc" as const }, { createdAt: "asc" as const }, { id: "asc" as const }];
-  const include = { assignee: { select: userSelect } } as const;
-  const [lists, openItems, doneIds, counts] = await Promise.all([
+  const include = { assignee: { select: userSelect }, ...extraAssigneesInclude } as const;
+  const [lists, openItems, doneIds, counts, sections] = await Promise.all([
     db.todoList.findMany({ where: { workspaceId: ctx.workspaceId, deletedAt: null }, orderBy: order }),
     db.todoItem.findMany({
       where: { workspaceId: ctx.workspaceId, status: "OPEN", deletedAt: null },
@@ -171,7 +229,17 @@ export async function listTodoLists(
       where: { workspaceId: ctx.workspaceId, deletedAt: null },
       _count: { _all: true },
     }),
+    db.todoSection.findMany({
+      where: { workspaceId: ctx.workspaceId, list: { deletedAt: null } },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    }),
   ]);
+  const sectionsByList = new Map<string, TodoSectionDTO[]>();
+  for (const sec of sections) {
+    const bucket = sectionsByList.get(sec.listId) ?? [];
+    bucket.push({ id: sec.id, name: sec.name, position: sec.position });
+    sectionsByList.set(sec.listId, bucket);
+  }
   const doneItems = doneIds.length
     ? await db.todoItem.findMany({
         where: { workspaceId: ctx.workspaceId, id: { in: doneIds.map((r) => r.id) } },
@@ -198,7 +266,9 @@ export async function listTodoLists(
     const loaded = itemsByList.get(l.id) ?? [];
     const { total, done } = countsByList.get(l.id) ?? { total: 0, done: 0 };
     const loadedDone = loaded.filter((i) => i.done).length;
-    const items = opts.assignedToMe ? loaded.filter((i) => i.assigneeId === ctx.userId) : loaded;
+    const items = opts.assignedToMe
+      ? loaded.filter((i) => i.assigneeId === ctx.userId || i.extraAssignees.some((u) => u.id === ctx.userId))
+      : loaded;
     return {
       id: l.id,
       name: l.name,
@@ -211,6 +281,7 @@ export async function listTodoLists(
       doneCount: done,
       // With the filter on, everything not shown counts as filtered out.
       hiddenDone: opts.assignedToMe ? 0 : done - loadedDone,
+      sections: sectionsByList.get(l.id) ?? [],
       items,
     };
   });
@@ -229,14 +300,19 @@ export async function listMyOpenTodos(
 ): Promise<{ items: MyOpenTodo[]; total: number }> {
   if (!isDateOnly(opts.today)) throw new ServiceError("VALIDATION", "Geçersiz tarih.");
   const take = Math.min(Math.max(opts.take ?? 8, 1), 50);
-  const where = { workspaceId: ctx.workspaceId, assigneeId: ctx.userId, status: "OPEN" as const, deletedAt: null };
+  const where = {
+    workspaceId: ctx.workspaceId,
+    OR: [{ assigneeId: ctx.userId }, { extraAssignees: { some: { userId: ctx.userId } } }],
+    status: "OPEN" as const,
+    deletedAt: null,
+  };
   const [rows, total] = await Promise.all([
     db.todoItem.findMany({
       where,
       // Postgres sorts NULLs last for ASC, so undated items come after dated ones.
       orderBy: [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
       take,
-      include: { assignee: { select: userSelect }, list: { select: { name: true } } },
+      include: { assignee: { select: userSelect }, list: { select: { name: true } }, ...extraAssigneesInclude },
     }),
     db.todoItem.count({ where }),
   ]);
@@ -329,6 +405,9 @@ export async function createTodoItem(ctx: TenantContext, listId: string, input: 
   const data = parseInput(createItemSchema, input);
   await getList(ctx, listId); // parent must belong to this workspace
   await requireAssignee(ctx, data.assigneeId);
+  const extras = cleanExtras(data.extraAssigneeIds ?? [], data.assigneeId);
+  await requireExtraAssignees(ctx, extras);
+  await requireSection(ctx, listId, data.sectionId);
   const item = await db.$transaction(async (tx) => {
     // Serialise position allocation per list.
     await tx.$queryRaw`SELECT id FROM "TodoList" WHERE id = ${listId} AND "workspaceId" = ${ctx.workspaceId} FOR UPDATE`;
@@ -345,12 +424,24 @@ export async function createTodoItem(ctx: TenantContext, listId: string, input: 
         notes: data.notes ?? null,
         assigneeId: data.assigneeId ?? null,
         dueDate: data.dueDate ? dateOnlyToDb(data.dueDate) : null,
+        startOn: data.startOn ? dateOnlyToDb(data.startOn) : null,
+        sectionId: data.sectionId ?? null,
         position: (max._max.position ?? -1) + 1,
+        ...(extras.length
+          ? { extraAssignees: { create: extras.map((userId) => ({ workspaceId: ctx.workspaceId, userId })) } }
+          : {}),
       },
     });
   });
   // After the main write; never fails the action.
-  await autoSubscribe(ctx, { type: "todo", id: item.id }, [ctx.userId, ...(item.assigneeId ? [item.assigneeId] : [])]);
+  await autoSubscribe(ctx, { type: "todo", id: item.id }, [
+    ctx.userId,
+    ...(item.assigneeId ? [item.assigneeId] : []),
+    ...extras,
+  ]);
+  for (const userId of extras) {
+    await notifyTodoAssigned(ctx, { id: item.id, title: item.title, assigneeId: userId });
+  }
   if (item.assigneeId) {
     await notifyTodoAssigned(ctx, { id: item.id, title: item.title, assigneeId: item.assigneeId });
   }
@@ -377,12 +468,16 @@ export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
       notes: true,
       status: true,
       dueDate: true,
+      startOn: true,
+      sectionId: true,
+      section: { select: { name: true } },
       completedAt: true,
       createdAt: true,
       createdById: true,
       list: { select: { id: true, name: true } },
       createdBy: personSelect,
       assignee: personSelect,
+      extraAssignees: { orderBy: { createdAt: "asc" }, select: { user: personSelect } },
     },
   });
   if (!item) throw notFound("Görev bulunamadı.");
@@ -390,6 +485,9 @@ export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
     ...item,
     done: item.status === "DONE",
     dueDate: item.dueDate ? dbToDateOnly(item.dueDate) : null,
+    startOn: item.startOn ? dbToDateOnly(item.startOn) : null,
+    sectionName: item.section?.name ?? null,
+    extraAssignees: item.extraAssignees.map((e) => e.user),
     canEdit: canModify(ctx, item.createdById),
   };
 }
@@ -407,18 +505,53 @@ export async function updateTodoItem(ctx: TenantContext, id: string, input: unkn
   const item = await getItem(ctx, id);
   if (!canModify(ctx, item.createdById)) throw forbidden();
   await requireAssignee(ctx, data.assigneeId);
-  const res = await db.todoItem.updateMany({
-    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
-    data: {
+  const primary = data.assigneeId !== undefined ? data.assigneeId : item.assigneeId;
+  const extras = data.extraAssigneeIds ? cleanExtras(data.extraAssigneeIds, primary) : undefined;
+  if (extras) await requireExtraAssignees(ctx, extras);
+  await requireSection(ctx, item.listId, data.sectionId);
+  const previousExtras = extras
+    ? (await db.todoAssignee.findMany({ where: { todoItemId: item.id, workspaceId: ctx.workspaceId } })).map(
+        (r) => r.userId,
+      )
+    : [];
+  const fields = {
+      ...(data.startOn !== undefined ? { startOn: data.startOn ? dateOnlyToDb(data.startOn) : null } : {}),
+      ...(data.sectionId !== undefined ? { sectionId: data.sectionId } : {}),
       ...(data.title !== undefined ? { title: data.title } : {}),
       ...(data.notes !== undefined ? { notes: data.notes } : {}),
       ...(data.assigneeId !== undefined ? { assigneeId: data.assigneeId } : {}),
       ...(data.dueDate !== undefined
         ? { dueDate: data.dueDate ? dateOnlyToDb(data.dueDate) : null }
         : {}),
-    },
-  });
-  if (res.count === 0) throw notFound("Görev bulunamadı.");
+  };
+  // Only extra assignees changed: nothing to write on the row itself (item existence was checked above).
+  if (Object.keys(fields).length > 0) {
+    const res = await db.todoItem.updateMany({
+      where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
+      data: fields,
+    });
+    if (res.count === 0) throw notFound("Görev bulunamadı.");
+  }
+  if (extras) {
+    await db.$transaction([
+      db.todoAssignee.deleteMany({
+        where: { todoItemId: item.id, workspaceId: ctx.workspaceId, userId: { notIn: extras } },
+      }),
+      db.todoAssignee.createMany({
+        data: extras.map((userId) => ({ workspaceId: ctx.workspaceId, todoItemId: item.id, userId })),
+        skipDuplicates: true,
+      }),
+    ]);
+    for (const userId of extras.filter((u) => !previousExtras.includes(u))) {
+      await autoSubscribe(ctx, { type: "todo", id: item.id }, [userId]);
+      await notifyTodoAssigned(ctx, { id: item.id, title: data.title ?? item.title, assigneeId: userId });
+    }
+  } else if (data.assigneeId) {
+    // A new primary assignee must not also stay an extra one.
+    await db.todoAssignee.deleteMany({
+      where: { todoItemId: item.id, workspaceId: ctx.workspaceId, userId: data.assigneeId },
+    });
+  }
   // Assigned or reassigned to someone new: tell the assignee (after the write).
   if (data.assigneeId && data.assigneeId !== item.assigneeId) {
     await autoSubscribe(ctx, { type: "todo", id: item.id }, [data.assigneeId]);
@@ -540,12 +673,17 @@ export async function moveTodoItem(ctx: TenantContext, id: string, input: unknow
     const source = await tx.todoItem.findMany({
       where: { listId: item.listId, workspaceId: ctx.workspaceId, deletedAt: null },
       orderBy: [...itemOrder],
-      select: { id: true, position: true, listId: true, status: true },
+      select: { id: true, position: true, listId: true, status: true, sectionId: true },
     });
 
     if (data.direction) {
       const index = source.findIndex((r) => r.id === id);
-      const ordered = moved(source, index, data.direction, (o) => o.status === fresh.status);
+      const ordered = moved(
+        source,
+        index,
+        data.direction,
+        (o) => o.status === fresh.status && o.sectionId === fresh.sectionId,
+      );
       await writeItemPositions(tx, ctx, item.listId, ordered);
       return;
     }
@@ -565,6 +703,8 @@ export async function moveTodoItem(ctx: TenantContext, id: string, input: unknow
       ...target,
       { id, position: -1, listId: item.listId },
     ]);
+    // Sections belong to one list: the moved item leaves its section.
+    await tx.todoItem.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data: { sectionId: null } });
   });
 }
 
@@ -601,5 +741,103 @@ export async function listTodoListOptions(ctx: TenantContext): Promise<{ id: str
     where: { workspaceId: ctx.workspaceId, deletedAt: null },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     select: { id: true, name: true },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sections: optional named headers inside a list. Positions are dense (0..n-1)
+// per list. Deleting a section keeps its items (sectionId becomes null).
+// ---------------------------------------------------------------------------
+
+const sectionRefSchema = z.string().min(1).max(64);
+
+async function lockSections(tx: Tx, ctx: TenantContext, listId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`todosection-positions:${ctx.workspaceId}:${listId}`}))`;
+}
+
+async function getSection(ctx: TenantContext, id: string) {
+  const parsed = parseInput(sectionRefSchema, id);
+  const section = await db.todoSection.findFirst({
+    where: { id: parsed, workspaceId: ctx.workspaceId, list: { deletedAt: null } },
+    include: { list: { select: { createdById: true } } },
+  });
+  if (!section) throw notFound("Bölüm bulunamadı.");
+  if (!canModify(ctx, section.list.createdById)) throw forbidden();
+  return section;
+}
+
+export async function createTodoSection(ctx: TenantContext, listId: string, input: unknown) {
+  const data = parseInput(z.object({ name: sectionNameSchema }), input);
+  const list = await getList(ctx, listId);
+  if (!canModify(ctx, list.createdById)) throw forbidden();
+  return db.$transaction(async (tx) => {
+    await lockSections(tx, ctx, list.id);
+    const max = await tx.todoSection.aggregate({
+      where: { listId: list.id, workspaceId: ctx.workspaceId },
+      _max: { position: true },
+    });
+    return tx.todoSection.create({
+      data: {
+        workspaceId: ctx.workspaceId,
+        listId: list.id,
+        name: data.name,
+        position: (max._max.position ?? -1) + 1,
+      },
+    });
+  });
+}
+
+export async function renameTodoSection(ctx: TenantContext, id: string, input: unknown) {
+  const data = parseInput(z.object({ name: sectionNameSchema }), input);
+  const section = await getSection(ctx, id);
+  await db.todoSection.updateMany({
+    where: { id: section.id, workspaceId: ctx.workspaceId },
+    data: { name: data.name },
+  });
+}
+
+/** Moves a section one step up/down among its list's sections (dense positions). */
+export async function moveTodoSection(ctx: TenantContext, id: string, direction: unknown) {
+  const dir = parseInput(directionSchema, direction);
+  const section = await getSection(ctx, id);
+  await db.$transaction(async (tx) => {
+    await lockSections(tx, ctx, section.listId);
+    const rows = await tx.todoSection.findMany({
+      where: { listId: section.listId, workspaceId: ctx.workspaceId },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, position: true },
+    });
+    const index = rows.findIndex((r) => r.id === section.id);
+    if (index === -1) throw notFound("Bölüm bulunamadı.");
+    const ordered = moved(rows, index, dir, () => true);
+    for (let i = 0; i < ordered.length; i++) {
+      if (ordered[i].position === i) continue;
+      await tx.todoSection.updateMany({
+        where: { id: ordered[i].id, workspaceId: ctx.workspaceId },
+        data: { position: i },
+      });
+    }
+  });
+}
+
+/** Deletes the section; its items stay in the list, ungrouped. */
+export async function deleteTodoSection(ctx: TenantContext, id: string) {
+  const section = await getSection(ctx, id);
+  await db.$transaction(async (tx) => {
+    await lockSections(tx, ctx, section.listId);
+    await tx.todoItem.updateMany({
+      where: { sectionId: section.id, workspaceId: ctx.workspaceId },
+      data: { sectionId: null },
+    });
+    await tx.todoSection.deleteMany({ where: { id: section.id, workspaceId: ctx.workspaceId } });
+    const rest = await tx.todoSection.findMany({
+      where: { listId: section.listId, workspaceId: ctx.workspaceId },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, position: true },
+    });
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i].position === i) continue;
+      await tx.todoSection.updateMany({ where: { id: rest[i].id }, data: { position: i } });
+    }
   });
 }

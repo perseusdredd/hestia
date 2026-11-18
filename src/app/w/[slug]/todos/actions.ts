@@ -8,6 +8,10 @@ import { getHillHistory, setHillPosition, type HillSnapshotDTO } from "@/server/
 import {
   createTodoItem,
   createTodoList,
+  createTodoSection,
+  deleteTodoSection,
+  moveTodoSection,
+  renameTodoSection,
   deleteTodoItem,
   deleteTodoList,
   moveTodoItem,
@@ -83,7 +87,10 @@ export async function createItemAction(
   const values = { title: formString(formData, "title") };
   try {
     const { ctx } = await requireWorkspace(slug);
-    await createTodoItem(ctx, formString(formData, "listId"), values);
+    await createTodoItem(ctx, formString(formData, "listId"), {
+      ...values,
+      sectionId: formString(formData, "sectionId"),
+    });
     revalidate(slug);
     return { ok: true };
   } catch (e) {
@@ -101,11 +108,17 @@ export async function updateItemAction(
     notes: formString(formData, "notes"),
     assigneeId: formString(formData, "assigneeId"),
     dueDate: formString(formData, "dueDate"),
+    startOn: formString(formData, "startOn"),
   };
   try {
     const { ctx } = await requireWorkspace(slug);
     const id = formString(formData, "id");
-    await updateTodoItem(ctx, id, values);
+    const sectionId = formData.has("sectionId") ? formString(formData, "sectionId") : undefined;
+    await updateTodoItem(ctx, id, {
+      ...values,
+      ...(sectionId !== undefined ? { sectionId } : {}),
+      extraAssigneeIds: formData.getAll("extraAssigneeIds").map(String).filter(Boolean),
+    });
     const listId = formString(formData, "listId");
     if (listId) await moveTodoItem(ctx, id, { listId }); // no-op when unchanged
     revalidate(slug);
@@ -200,5 +213,67 @@ export async function hillHistoryAction(
     return { ok: true, history: await getHillHistory(ctx, listId) };
   } catch (e) {
     return { ok: false, error: toActionState(e).error ?? "Geçmiş yüklenemedi." };
+  }
+}
+
+export async function createSectionAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const values = { name: formString(formData, "name") };
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    await createTodoSection(ctx, formString(formData, "listId"), values);
+    revalidate(slug);
+    return { ok: true, message: "Bölüm eklendi." };
+  } catch (e) {
+    return { ...toActionState(e), values };
+  }
+}
+
+export async function renameSectionAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const values = { name: formString(formData, "name") };
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    await renameTodoSection(ctx, formString(formData, "id"), values);
+    revalidate(slug);
+    return { ok: true, message: "Bölüm güncellendi." };
+  } catch (e) {
+    return { ...toActionState(e), values };
+  }
+}
+
+export async function deleteSectionAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    await deleteTodoSection(ctx, formString(formData, "id"));
+    revalidate(slug);
+    return { ok: true, message: "Bölüm silindi." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function moveSectionAction(
+  slug: string,
+  id: string,
+  direction: "up" | "down",
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    await moveTodoSection(ctx, id, direction);
+    revalidate(slug);
+    return { ok: true };
+  } catch (e) {
+    return toActionState(e);
   }
 }

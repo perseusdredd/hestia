@@ -36,6 +36,7 @@ model User {
   todoListsMade   TodoList[]
   todosCreated    TodoItem[]    @relation("TodoCreator")
   todosAssigned   TodoItem[]    @relation("TodoAssignee")
+  todoAssignments TodoAssignee[]
   cardsCreated    Card[]        @relation("CardCreator")
   cardsAssigned   Card[]        @relation("CardAssignee")
   foldersCreated  Folder[]
@@ -118,6 +119,8 @@ model Workspace {
   comments     Comment[]
   todoLists    TodoList[]
   todoItems    TodoItem[]
+  todoSections TodoSection[]
+  todoAssignees TodoAssignee[]
   folders      Folder[]
   files        File[]
   documents    Document[]
@@ -274,6 +277,7 @@ model TodoList {
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy User       @relation(fields: [createdById], references: [id], onDelete: Cascade)
   items     TodoItem[]
+  sections  TodoSection[]
   hillSnapshots HillSnapshot[]
 
   @@index([workspaceId, position])
@@ -305,6 +309,8 @@ model TodoItem {
   notes       String?    @db.Text
   status      TodoStatus @default(OPEN)
   dueDate     DateTime?  @db.Date
+  startOn     DateTime?  @db.Date
+  sectionId   String?
   completedAt DateTime?
   position    Int        @default(0)
   createdAt   DateTime   @default(now())
@@ -314,6 +320,8 @@ model TodoItem {
   deletedById String?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  section   TodoSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  extraAssignees TodoAssignee[]
   list      TodoList  @relation(fields: [listId], references: [id], onDelete: Cascade)
   createdBy User      @relation("TodoCreator", fields: [createdById], references: [id], onDelete: Cascade)
   assignee  User?     @relation("TodoAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
@@ -323,6 +331,39 @@ model TodoItem {
   @@index([workspaceId, status])
   @@index([assigneeId])
   @@index([workspaceId, deletedAt])
+  @@index([sectionId])
+}
+
+/// Optional named header inside a to-do list. Items with sectionId null render ungrouped.
+model TodoSection {
+  id          String   @id @default(cuid())
+  workspaceId String
+  listId      String
+  name        String
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  list      TodoList   @relation(fields: [listId], references: [id], onDelete: Cascade)
+  items     TodoItem[]
+
+  @@index([workspaceId, listId])
+}
+
+/// Additional assignees of a to-do (TodoItem.assigneeId stays the primary one).
+model TodoAssignee {
+  id          String   @id @default(cuid())
+  workspaceId String
+  todoItemId  String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  todoItem  TodoItem  @relation(fields: [todoItemId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([todoItemId, userId])
+  @@index([workspaceId, userId])
 }
 
 // ----------------------------------------------------- Files and docs ----

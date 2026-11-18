@@ -92,11 +92,15 @@ export default async function TodoItemPage({ params }: { params: Params }) {
               <div className="space-y-1">
                 <dt className="text-xs text-muted-foreground">Atanan kişi</dt>
                 <dd className="flex min-w-0 items-center gap-2">
-                  {item.assignee ? (
-                    <>
-                      <UserAvatar user={item.assignee} size="sm" />
-                      <span className="truncate">{displayName(item.assignee)}</span>
-                    </>
+                  {item.assignee || item.extraAssignees.length > 0 ? (
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                      {[...(item.assignee ? [item.assignee] : []), ...item.extraAssignees].map((u) => (
+                        <span key={u.id} className="inline-flex min-w-0 items-center gap-2">
+                          <UserAvatar user={u} size="sm" />
+                          <span className="truncate">{displayName(u)}</span>
+                        </span>
+                      ))}
+                    </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                       <UserRound className="size-4" aria-hidden />
@@ -125,6 +129,21 @@ export default async function TodoItemPage({ params }: { params: Params }) {
                   )}
                 </dd>
               </div>
+              {item.startOn ? (
+                <div className="space-y-1">
+                  <dt className="text-xs text-muted-foreground">Başlangıç tarihi</dt>
+                  <dd className="flex items-center gap-1.5 tabular-nums">
+                    <CalendarDays className="size-4 text-muted-foreground" aria-hidden />
+                    {formatDueDate(item.startOn)}
+                  </dd>
+                </div>
+              ) : null}
+              {item.sectionName ? (
+                <div className="space-y-1">
+                  <dt className="text-xs text-muted-foreground">Bölüm</dt>
+                  <dd className="break-words">{item.sectionName}</dd>
+                </div>
+              ) : null}
             </dl>
 
             <div className="space-y-1">

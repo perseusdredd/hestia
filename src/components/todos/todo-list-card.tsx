@@ -17,13 +17,15 @@ import { useKeepFocus } from "@/components/use-keep-focus";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/submit-button";
 import { Card } from "@/components/ui/card";
+import { NativeSelect } from "@/components/native-select";
 import { Input } from "@/components/ui/input";
 import type { ActionState } from "@/lib/action-state";
 import { cn } from "@/lib/utils";
-import type { TodoListDTO, TodoUser } from "@/server/todos";
+import type { TodoListDTO, TodoSectionDTO, TodoUser } from "@/server/todos";
 
 import { HillChart } from "./hill-chart";
 import { EditListButton } from "./list-dialogs";
+import { AddSectionForm, SectionHeader } from "./section-controls";
 import { TodoItemRow } from "./todo-item-row";
 
 export function TodoListCard({
@@ -58,10 +60,10 @@ export function TodoListCard({
       if ("move" in change) {
         const index = current.findIndex((i) => i.id === change.id);
         if (index === -1) return current;
-        const group = current[index].done;
+        const group = current[index];
         const step = change.move === "up" ? -1 : 1;
         let j = index + step;
-        while (j >= 0 && j < current.length && current[j].done !== group) j += step;
+        while (j >= 0 && j < current.length && (current[j].done !== group.done || current[j].sectionId !== group.sectionId)) j += step;
         if (j < 0 || j >= current.length) return current;
         const next = [...current];
         const [x] = next.splice(index, 1);
@@ -126,6 +128,30 @@ export function TodoListCard({
 
   const open = items.filter((i) => !i.done);
   const done = items.filter((i) => i.done);
+
+  // Optional sections: items without a (known) section render first, ungrouped, exactly as before.
+  const sectionIds = new Set(list.sections.map((sec) => sec.id));
+  const ungroupedOpen = open.filter((i) => !i.sectionId || !sectionIds.has(i.sectionId));
+  const renderOpenRows = (rows: typeof open) => (
+    <ul className="divide-y">
+      {rows.map((item, index) => (
+        <TodoItemRow
+          key={item.id}
+          slug={slug}
+          item={item}
+          members={members}
+          today={today}
+          onToggle={onToggle}
+          listOptions={listOptions}
+          onMove={canReorder ? onMove : undefined}
+          canMoveUp={canReorder && index > 0}
+          canMoveDown={canReorder && index < rows.length - 1}
+          commentCount={commentCounts[item.id] ?? 0}
+          sections={list.sections}
+        />
+      ))}
+    </ul>
+  );
 
   return (
     <Card className="gap-0 py-0 shadow-xs">
@@ -222,24 +248,30 @@ export function TodoListCard({
         </p>
       ) : (
         <>
-          {open.length > 0 ? (
-            <ul className="divide-y">
-              {open.map((item, index) => (
-                <TodoItemRow
-                  key={item.id}
-                  slug={slug}
-                  item={item}
-                  members={members}
-                  today={today}
-                  onToggle={onToggle}
-                  listOptions={listOptions}
-                  onMove={canReorder ? onMove : undefined}
-                  canMoveUp={canReorder && index > 0}
-                  canMoveDown={canReorder && index < open.length - 1}
-                  commentCount={commentCounts[item.id] ?? 0}
-                />
-              ))}
-            </ul>
+          {open.length > 0 || list.sections.length > 0 ? (
+            <>
+              {ungroupedOpen.length > 0 ? renderOpenRows(ungroupedOpen) : null}
+              {list.sections.map((sec, secIndex) => {
+                const rows = open.filter((i) => i.sectionId === sec.id);
+                if (readOnlyAdd && rows.length === 0) return null;
+                return (
+                  <div key={sec.id}>
+                    <SectionHeader
+                      slug={slug}
+                      section={sec}
+                      count={rows.length}
+                      canEdit={list.canEdit && canReorder}
+                      isFirst={secIndex === 0}
+                      isLast={secIndex === list.sections.length - 1}
+                    />
+                    {rows.length > 0 ? renderOpenRows(rows) : null}
+                  </div>
+                );
+              })}
+              {open.length === 0 ? (
+                <p className="px-4 py-4 text-center text-sm text-muted-foreground">Açık görev kalmadı.</p>
+              ) : null}
+            </>
           ) : (
             <p className="px-4 py-4 text-center text-sm text-muted-foreground">
               Açık görev kalmadı.
@@ -269,6 +301,7 @@ export function TodoListCard({
                       canMoveUp={canReorder && index > 0}
                       canMoveDown={canReorder && index < done.length - 1}
                       commentCount={commentCounts[item.id] ?? 0}
+                      sections={list.sections}
                     />
                   ))}
                 </ul>
@@ -290,12 +323,21 @@ export function TodoListCard({
         </p>
       ) : null}
 
-      {readOnlyAdd ? null : <AddItemForm slug={slug} listId={list.id} />}
+      {readOnlyAdd ? null : <AddItemForm slug={slug} listId={list.id} sections={list.sections} />}
+      {readOnlyAdd || !list.canEdit ? null : <AddSectionForm slug={slug} listId={list.id} />}
     </Card>
   );
 }
 
-function AddItemForm({ slug, listId }: { slug: string; listId: string }) {
+function AddItemForm({
+  slug,
+  listId,
+  sections,
+}: {
+  slug: string;
+  listId: string;
+  sections: TodoSectionDTO[];
+}) {
   const formRef = useRef<HTMLFormElement>(null);
   const [state, action, pending] = useActionState<ActionState, FormData>(
     createItemAction.bind(null, slug),
@@ -336,6 +378,16 @@ function AddItemForm({ slug, listId }: { slug: string; listId: string }) {
           <span className="hidden sm:inline">Ekle</span>
         </SubmitButton>
       </div>
+      {sections.length > 0 ? (
+        <NativeSelect name="sectionId" defaultValue="" aria-label="Bölüm">
+          <option value="">Bölümsüz</option>
+          {sections.map((sec) => (
+            <option key={sec.id} value={sec.id}>
+              {sec.name}
+            </option>
+          ))}
+        </NativeSelect>
+      ) : null}
       <FieldError errors={state.fieldErrors?.title} />
       {!state.ok && state.error && !state.fieldErrors?.title ? (
         <p role="alert" className="text-xs text-destructive">
