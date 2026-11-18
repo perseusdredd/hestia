@@ -444,6 +444,8 @@ function EditItemForm({
           {members.length > 1 ? (
             <fieldset className="grid gap-1.5">
               <legend className="text-sm font-medium">Ek atananlar</legend>
+              {/* Marks that the picker was shown, so submitting replaces extras intentionally. */}
+              <input type="hidden" name="extraAssigneesPresent" value="1" />
               <div className="grid max-h-32 gap-1 overflow-y-auto sm:grid-cols-2">
                 {members.map((m) => (
                   <label key={m.id} className="flex items-center gap-2 text-sm">

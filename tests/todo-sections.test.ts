@@ -270,3 +270,42 @@ describe("multiple assignees", () => {
     expect(detail.startOn).toBe("2026-06-01");
   });
 });
+
+describe("start/due validation and extra-assignee update semantics", () => {
+  async function err(p: Promise<unknown>): Promise<string> {
+    try {
+      await p;
+      return "OK";
+    } catch (e) {
+      return (e as { code?: string }).code ?? "OTHER";
+    }
+  }
+
+  it("rejects a start date after the due date (create and edit)", async () => {
+    const list = await createTodoList(ctxA, { name: "Tarih kontrolü" });
+    expect(await err(createTodoItem(ctxA, list.id, { title: "x", startOn: "2026-12-10", dueDate: "2026-12-01" }))).toBe("VALIDATION");
+    const ok = await createTodoItem(ctxA, list.id, { title: "y", startOn: "2026-12-01", dueDate: "2026-12-10" });
+    // The edit form always submits both dates together, so an inconsistent pair is caught.
+    expect(await err(updateTodoItem(ctxA, ok.id, { startOn: "2026-12-20", dueDate: "2026-12-10" }))).toBe("VALIDATION");
+    expect(await err(updateTodoItem(ctxA, ok.id, { startOn: "2026-12-05", dueDate: "2026-12-10" }))).toBe("OK");
+  });
+
+  it("updateTodoItem keeps extra assignees when omitted, clears on [], replaces on [id]", async () => {
+    const list = await createTodoList(ctxA, { name: "Çoklu atama" });
+    const item = await createTodoItem(ctxA, list.id, { title: "görev", extraAssigneeIds: [memberA.userId, memberA2.userId] });
+    const extras = () =>
+      db.todoAssignee
+        .findMany({ where: { todoItemId: item.id }, select: { userId: true } })
+        .then((r) => r.map((x) => x.userId).sort());
+
+    expect(await extras()).toEqual([memberA.userId, memberA2.userId].sort());
+    // Omitting extraAssigneeIds (e.g. an edit form without the picker) must NOT wipe them.
+    await updateTodoItem(ctxA, item.id, { title: "güncel" });
+    expect(await extras()).toEqual([memberA.userId, memberA2.userId].sort());
+    // A provided list replaces; an empty list clears.
+    await updateTodoItem(ctxA, item.id, { extraAssigneeIds: [memberA3.userId] });
+    expect(await extras()).toEqual([memberA3.userId]);
+    await updateTodoItem(ctxA, item.id, { extraAssigneeIds: [] });
+    expect(await extras()).toEqual([]);
+  });
+});

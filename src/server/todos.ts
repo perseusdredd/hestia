@@ -60,24 +60,37 @@ const updateListSchema = z.object({
   name: listNameSchema.optional(),
   description: listDescriptionSchema.optional(),
 });
-const createItemSchema = z.object({
-  title: titleSchema,
-  notes: notesSchema.optional(),
-  assigneeId: assigneeSchema.optional(),
-  dueDate: dueDateSchema.optional(),
-  startOn: startDateSchema.optional(),
-  sectionId: sectionIdSchema.optional(),
-  extraAssigneeIds: extraAssigneesSchema.optional(),
-});
-const updateItemSchema = z.object({
-  title: titleSchema.optional(),
-  notes: notesSchema.optional(),
-  assigneeId: assigneeSchema.optional(),
-  dueDate: dueDateSchema.optional(),
-  startOn: startDateSchema.optional(),
-  sectionId: sectionIdSchema.optional(),
-  extraAssigneeIds: extraAssigneesSchema.optional(),
-});
+// yyyy-MM-dd strings compare correctly as plain strings, so a start date must
+// not fall after the due date.
+const startNotAfterDue = (v: { startOn?: string | null; dueDate?: string | null }) =>
+  !v.startOn || !v.dueDate || v.startOn <= v.dueDate;
+const startNotAfterDueError = {
+  message: "Başlangıç tarihi bitiş tarihinden sonra olamaz.",
+  path: ["startOn"] as PropertyKey[],
+};
+
+const createItemSchema = z
+  .object({
+    title: titleSchema,
+    notes: notesSchema.optional(),
+    assigneeId: assigneeSchema.optional(),
+    dueDate: dueDateSchema.optional(),
+    startOn: startDateSchema.optional(),
+    sectionId: sectionIdSchema.optional(),
+    extraAssigneeIds: extraAssigneesSchema.optional(),
+  })
+  .refine(startNotAfterDue, startNotAfterDueError);
+const updateItemSchema = z
+  .object({
+    title: titleSchema.optional(),
+    notes: notesSchema.optional(),
+    assigneeId: assigneeSchema.optional(),
+    dueDate: dueDateSchema.optional(),
+    startOn: startDateSchema.optional(),
+    sectionId: sectionIdSchema.optional(),
+    extraAssigneeIds: extraAssigneesSchema.optional(),
+  })
+  .refine(startNotAfterDue, startNotAfterDueError);
 
 export type TodoUser = { id: string; name: string | null; email: string; image: string | null };
 

@@ -117,7 +117,11 @@ export async function updateItemAction(
     await updateTodoItem(ctx, id, {
       ...values,
       ...(sectionId !== undefined ? { sectionId } : {}),
-      extraAssigneeIds: formData.getAll("extraAssigneeIds").map(String).filter(Boolean),
+      // Only replace extra assignees when the form actually rendered the picker
+      // (marker present); otherwise leave the existing extras untouched.
+      ...(formData.has("extraAssigneesPresent")
+        ? { extraAssigneeIds: formData.getAll("extraAssigneeIds").map(String).filter(Boolean) }
+        : {}),
     });
     const listId = formString(formData, "listId");
     if (listId) await moveTodoItem(ctx, id, { listId }); // no-op when unchanged
