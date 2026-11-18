@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { hasRole } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
-import { forbidden, notFound, parseInput } from "@/server/errors";
+import { conflict, forbidden, notFound, parseInput } from "@/server/errors";
 
 export const DEFAULT_MESSAGE_CATEGORIES = [
   { name: "Duyuru", emoji: "📢" },
@@ -54,13 +54,18 @@ function requireAdmin(ctx: TenantContext) {
 export async function createCategory(ctx: TenantContext, input: unknown) {
   requireAdmin(ctx);
   const data = parseInput(categorySchema, input);
-  const last = await db.messageCategory.findFirst({
-    where: { workspaceId: ctx.workspaceId },
-    orderBy: { position: "desc" },
-    select: { position: true },
-  });
-  return db.messageCategory.create({
-    data: { ...data, workspaceId: ctx.workspaceId, position: (last?.position ?? -1) + 1 },
+  return db.$transaction(async (tx) => {
+    await lockCategoryPositions(tx, ctx.workspaceId);
+    const count = await tx.messageCategory.count({ where: { workspaceId: ctx.workspaceId } });
+    if (count >= MAX_CATEGORIES) throw conflict(`En fazla ${MAX_CATEGORIES} kategori oluşturabilirsiniz.`);
+    const last = await tx.messageCategory.findFirst({
+      where: { workspaceId: ctx.workspaceId },
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+    return tx.messageCategory.create({
+      data: { ...data, workspaceId: ctx.workspaceId, position: (last?.position ?? -1) + 1 },
+    });
   });
 }
 
@@ -77,6 +82,58 @@ export async function updateCategory(ctx: TenantContext, categoryId: string, inp
 /** Posts in the category keep existing (their categoryId becomes null). */
 export async function deleteCategory(ctx: TenantContext, categoryId: string) {
   requireAdmin(ctx);
-  const res = await db.messageCategory.deleteMany({ where: { id: categoryId, workspaceId: ctx.workspaceId } });
-  if (res.count === 0) throw notFound("Kategori bulunamadı.");
+  await db.$transaction(async (tx) => {
+    await lockCategoryPositions(tx, ctx.workspaceId);
+    const res = await tx.messageCategory.deleteMany({ where: { id: categoryId, workspaceId: ctx.workspaceId } });
+    if (res.count === 0) throw notFound("Kategori bulunamadı.");
+    await renumber(tx, ctx.workspaceId);
+  });
+}
+
+const directionSchema = z.enum(["up", "down"], { error: "Geçersiz yön." });
+
+/** Moves a category one step up/down; positions stay dense (0..n-1). */
+export async function moveCategory(ctx: TenantContext, categoryId: string, direction: unknown) {
+  requireAdmin(ctx);
+  const dir = parseInput(directionSchema, direction);
+  await db.$transaction(async (tx) => {
+    await lockCategoryPositions(tx, ctx.workspaceId);
+    const rows = await orderedRows(tx, ctx.workspaceId);
+    const index = rows.findIndex((r) => r.id === categoryId);
+    if (index === -1) throw notFound("Kategori bulunamadı.");
+    const j = dir === "up" ? index - 1 : index + 1;
+    if (j >= 0 && j < rows.length) {
+      const [x] = rows.splice(index, 1);
+      rows.splice(j, 0, x);
+    }
+    await writePositions(tx, ctx.workspaceId, rows);
+  });
+}
+
+/** Serialises position changes per workspace (works even with zero rows). */
+async function lockCategoryPositions(tx: Prisma.TransactionClient, workspaceId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`messagecategory-positions:${workspaceId}`}))`;
+}
+
+function orderedRows(tx: Prisma.TransactionClient, workspaceId: string) {
+  return tx.messageCategory.findMany({
+    where: { workspaceId },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, position: true },
+  });
+}
+
+async function writePositions(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  rows: { id: string; position: number }[],
+) {
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].position === i) continue;
+    await tx.messageCategory.updateMany({ where: { id: rows[i].id, workspaceId }, data: { position: i } });
+  }
+}
+
+async function renumber(tx: Prisma.TransactionClient, workspaceId: string) {
+  await writePositions(tx, workspaceId, await orderedRows(tx, workspaceId));
 }

@@ -6,6 +6,12 @@ import { redirect } from "next/navigation";
 import { formString, toActionState, type ActionState } from "@/lib/action-state";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { requireWorkspace } from "@/lib/tenant";
+import {
+  createCategory,
+  deleteCategory,
+  moveCategory,
+  updateCategory,
+} from "@/server/message-categories";
 import { NOTIFICATION_TYPES } from "@/server/notifications";
 import { setMutedTypes } from "@/server/notification-preferences";
 import { hitInviteRateLimit } from "@/server/rate-limit";
@@ -181,6 +187,69 @@ export async function saveNotificationPreferencesAction(
     );
     revalidate(slug);
     return { ok: true, message: "Bildirim tercihleri kaydedildi." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function createCategoryAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    await createCategory(ctx, { name: formString(formData, "name"), emoji: formString(formData, "emoji") });
+    revalidate(slug);
+    return { ok: true, message: "Kategori eklendi." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function updateCategoryAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    await updateCategory(ctx, formString(formData, "id"), {
+      name: formString(formData, "name"),
+      emoji: formString(formData, "emoji"),
+    });
+    revalidate(slug);
+    return { ok: true, message: "Kategori güncellendi." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function deleteCategoryAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    await deleteCategory(ctx, formString(formData, "id"));
+    revalidate(slug);
+    return { ok: true, message: "Kategori silindi." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function moveCategoryAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug, "ADMIN");
+    await moveCategory(ctx, formString(formData, "id"), formString(formData, "direction"));
+    revalidate(slug);
+    return { ok: true };
   } catch (e) {
     return toActionState(e);
   }

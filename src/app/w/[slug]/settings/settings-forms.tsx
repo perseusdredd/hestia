@@ -1,12 +1,15 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { CopyButton } from "@/components/copy-button";
 import { FieldError, FormError } from "@/components/form-error";
 import { NativeSelect } from "@/components/native-select";
 import { SubmitButton } from "@/components/submit-button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ActionState } from "@/lib/action-state";
@@ -16,7 +19,11 @@ import type { NotificationType } from "@/server/notifications";
 
 import {
   changeRoleAction,
+  createCategoryAction,
   createInviteLinkAction,
+  deleteCategoryAction,
+  moveCategoryAction,
+  updateCategoryAction,
   deleteWorkspaceAction,
   inviteMemberAction,
   renameWorkspaceAction,
@@ -304,5 +311,126 @@ export function NotificationPreferencesForm({ slug, muted }: { slug: string; mut
         </SubmitButton>
       </div>
     </form>
+  );
+}
+
+export function CategoryCreateForm({ slug }: { slug: string }) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(createCategoryAction.bind(null, slug), {});
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (state.ok) {
+      formRef.current?.reset();
+      if (state.message) toast.success(state.message);
+    }
+  }, [state]);
+
+  return (
+    <form ref={formRef} action={action} className="grid gap-3 sm:grid-cols-[5rem_1fr_auto] sm:items-start" noValidate>
+      <div className="grid gap-1.5">
+        <Label htmlFor="cat-new-emoji" className="sr-only">
+          Emoji
+        </Label>
+        <Input id="cat-new-emoji" name="emoji" required maxLength={16} placeholder="🙂" autoComplete="off" />
+        <FieldError errors={state.fieldErrors?.emoji} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="cat-new-name" className="sr-only">
+          Kategori adı
+        </Label>
+        <Input id="cat-new-name" name="name" required maxLength={40} placeholder="Yeni kategori adı" autoComplete="off" />
+        <FieldError errors={state.fieldErrors?.name} />
+        {!state.ok && !state.fieldErrors ? <FormError message={state.error} /> : null}
+      </div>
+      <SubmitButton pending={pending} variant="outline">
+        Ekle
+      </SubmitButton>
+    </form>
+  );
+}
+
+export function CategoryRow({
+  slug,
+  category,
+  isFirst,
+  isLast,
+}: {
+  slug: string;
+  category: { id: string; name: string; emoji: string };
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(updateCategoryAction.bind(null, slug), {});
+  const [, moveAction, movePending] = useActionState<ActionState, FormData>(moveCategoryAction.bind(null, slug), {});
+  useEffect(() => {
+    if (state.ok && state.message) toast.success(state.message);
+  }, [state]);
+
+  return (
+    <li className="grid gap-1 py-3 first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <form action={action} className="flex min-w-0 flex-1 flex-wrap items-center gap-2" noValidate>
+          <input type="hidden" name="id" value={category.id} />
+          <Input
+            name="emoji"
+            aria-label={`${category.name} emojisi`}
+            className="w-16"
+            required
+            maxLength={16}
+            key={`e-${category.emoji}`}
+            defaultValue={category.emoji}
+          />
+          <Input
+            name="name"
+            aria-label={`${category.name} adı`}
+            className="min-w-40 flex-1"
+            required
+            maxLength={40}
+            key={`n-${category.name}`}
+            defaultValue={category.name}
+          />
+          <SubmitButton pending={pending} variant="outline" size="sm">
+            Kaydet
+          </SubmitButton>
+        </form>
+        <form action={moveAction} className="flex gap-1">
+          <input type="hidden" name="id" value={category.id} />
+          <Button
+            type="submit"
+            name="direction"
+            value="up"
+            variant="ghost"
+            size="icon-sm"
+            disabled={isFirst || movePending}
+            aria-label={`${category.name} kategorisini yukarı taşı`}
+          >
+            <ArrowUp aria-hidden />
+          </Button>
+          <Button
+            type="submit"
+            name="direction"
+            value="down"
+            variant="ghost"
+            size="icon-sm"
+            disabled={isLast || movePending}
+            aria-label={`${category.name} kategorisini aşağı taşı`}
+          >
+            <ArrowDown aria-hidden />
+          </Button>
+        </form>
+        <ConfirmAction
+          action={deleteCategoryAction.bind(null, slug)}
+          fields={{ id: category.id }}
+          title={`"${category.name}" kategorisi silinsin mi?`}
+          description="Bu kategorideki mesajlar silinmez; yalnızca kategorisiz kalır."
+          confirmLabel="Kategoriyi sil"
+          successMessage="Kategori silindi."
+          trigger={<Trash2 aria-hidden />}
+          triggerSize="icon-sm"
+          triggerLabel={`${category.name} kategorisini sil`}
+        />
+      </div>
+      {!state.ok && state.error ? <FormError message={state.error} /> : null}
+      <FieldError errors={state.fieldErrors?.name} />
+    </li>
   );
 }

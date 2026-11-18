@@ -10,6 +10,7 @@ import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDate } from "@/lib/format";
 import { hasRole, ROLE_LABELS, type Role } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
+import { listCategories } from "@/server/message-categories";
 import { getMutedTypes } from "@/server/notification-preferences";
 import { listMembers, listPendingInvitations } from "@/server/workspaces";
 
@@ -20,6 +21,8 @@ import {
 } from "./actions";
 import { getRequestOrigin } from "@/lib/request-origin";
 import {
+  CategoryCreateForm,
+  CategoryRow,
   DeleteWorkspaceForm,
   InviteForm,
   InviteLinkField,
@@ -37,10 +40,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
   const isAdmin = hasRole(ctx.role, "ADMIN");
   const isOwner = ctx.role === "OWNER";
 
-  const [members, invitations, mutedTypes] = await Promise.all([
+  const [members, invitations, mutedTypes, categories] = await Promise.all([
     listMembers(ctx),
     isAdmin ? listPendingInvitations(ctx) : Promise.resolve([]),
     getMutedTypes(ctx),
+    isAdmin ? listCategories(ctx) : Promise.resolve([]),
   ]);
 
   const origin = isAdmin ? await getRequestOrigin() : "";
@@ -205,6 +209,38 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
                 })}
               </ul>
             )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Mesaj kategorileri</CardTitle>
+            <CardDescription>
+              Mesajlarda kullanılan kategoriler. Sıra, kategori seçicideki sırayı belirler. Bir kategoriyi
+              silmek mesajları silmez.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-5">
+            {categories.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Henüz kategori yok.</p>
+            ) : (
+              <ul className="divide-y">
+                {categories.map((c, i) => (
+                  <CategoryRow
+                    key={c.id}
+                    slug={slug}
+                    category={c}
+                    isFirst={i === 0}
+                    isLast={i === categories.length - 1}
+                  />
+                ))}
+              </ul>
+            )}
+            <div className="border-t pt-5">
+              <CategoryCreateForm slug={slug} />
+            </div>
           </CardContent>
         </Card>
       ) : null}
