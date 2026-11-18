@@ -4,6 +4,7 @@ import {
   CheckSquare,
   FolderOpen,
   House,
+  UserRound,
   MessageSquare,
   MessagesSquare,
   Settings,
@@ -13,7 +14,7 @@ import {
 
 export type NavItem = {
   /** Path segment under /w/[slug]; "" is the overview. */
-  segment: "" | "messages" | "todos" | "files" | "calendar" | "chat" | "activity" | "trash" | "settings";
+  segment: "" | "my" | "messages" | "todos" | "files" | "calendar" | "chat" | "activity" | "trash" | "settings";
   label: string;
   icon: LucideIcon;
 };
@@ -21,6 +22,7 @@ export type NavItem = {
 /** Single source of truth for the workspace navigation. */
 export const NAV_ITEMS: NavItem[] = [
   { segment: "", label: "Genel bakış", icon: House },
+  { segment: "my", label: "Benim İşlerim", icon: UserRound },
   { segment: "messages", label: "Mesajlar", icon: MessageSquare },
   { segment: "todos", label: "Yapılacaklar", icon: CheckSquare },
   { segment: "files", label: "Dosyalar", icon: FolderOpen },

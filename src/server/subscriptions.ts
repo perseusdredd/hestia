@@ -146,3 +146,51 @@ export async function ensureSubscribers(
     console.error("[subscriptions] ensureSubscribers failed:", e);
   }
 }
+
+export type MySubscription = {
+  type: SubscriptionSubjectType;
+  id: string;
+  title: string;
+  subscribedAt: Date;
+};
+
+/**
+ * Items the caller follows in this workspace, newest subscription first.
+ * Subjects are polymorphic (no FK), so each one is re-loaded workspace-scoped
+ * and trashed, hidden-draft or vanished subjects are dropped.
+ */
+export async function listMySubscriptions(ctx: TenantContext, opts: { take?: number } = {}): Promise<MySubscription[]> {
+  const take = Math.min(Math.max(opts.take ?? 20, 1), 50);
+  const subs = await db.subscription.findMany({
+    where: { workspaceId: ctx.workspaceId, userId: ctx.userId },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+  const idsOf = (t: SubscriptionSubjectType) => subs.filter((s) => s.subjectType === t).map((s) => s.subjectId);
+  const base = { workspaceId: ctx.workspaceId, deletedAt: null };
+  const [posts, todos, events] = await Promise.all([
+    db.post.findMany({
+      where: { ...base, id: { in: idsOf("post") }, ...visiblePostWhere(ctx) },
+      select: { id: true, title: true },
+    }),
+    db.todoItem.findMany({
+      where: { ...base, id: { in: idsOf("todo") }, list: { workspaceId: ctx.workspaceId, deletedAt: null } },
+      select: { id: true, title: true },
+    }),
+    db.event.findMany({ where: { ...base, id: { in: idsOf("event") } }, select: { id: true, title: true } }),
+  ]);
+  const titles: Record<SubscriptionSubjectType, Map<string, string>> = {
+    post: new Map(posts.map((p) => [p.id, p.title])),
+    todo: new Map(todos.map((t) => [t.id, t.title])),
+    event: new Map(events.map((e) => [e.id, e.title])),
+  };
+  const out: MySubscription[] = [];
+  for (const s of subs) {
+    const type = s.subjectType as SubscriptionSubjectType;
+    const title = titles[type]?.get(s.subjectId);
+    if (title === undefined) continue;
+    out.push({ type, id: s.subjectId, title, subscribedAt: s.createdAt });
+    if (out.length >= take) break;
+  }
+  return out;
+}
