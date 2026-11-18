@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { autoSubscribe } from "@/server/subscriptions";
 import { markdownExcerpt } from "@/lib/markdown-plain";
 import { parseMentionIds } from "@/lib/mentions";
 import { canModify, hasRole } from "@/lib/roles";
@@ -152,6 +153,7 @@ export async function createPost(ctx: TenantContext, input: unknown) {
   const post = await db.post.create({
     data: { ...data, workspaceId: ctx.workspaceId, authorId: ctx.userId },
   });
+  await autoSubscribe(ctx, { type: "post", id: post.id }, [ctx.userId]);
   await notifyNewPost(ctx, post); // after the main write; never throws
   await recordActivity(ctx, {
     type: "POST_CREATED",

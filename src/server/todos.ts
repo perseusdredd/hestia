@@ -8,6 +8,7 @@ import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, recordActivity, recordTodoToggled } from "@/server/activity";
 import { conflict, forbidden, notFound, ServiceError, parseInput } from "@/server/errors";
 import { notifyTodoAssigned } from "@/server/notifications";
+import { autoSubscribe } from "@/server/subscriptions";
 import { isWorkspaceMember } from "@/server/workspaces";
 
 /**
@@ -345,6 +346,7 @@ export async function createTodoItem(ctx: TenantContext, listId: string, input: 
     });
   });
   // After the main write; never fails the action.
+  await autoSubscribe(ctx, { type: "todo", id: item.id }, [ctx.userId, ...(item.assigneeId ? [item.assigneeId] : [])]);
   if (item.assigneeId) {
     await notifyTodoAssigned(ctx, { id: item.id, title: item.title, assigneeId: item.assigneeId });
   }
@@ -415,6 +417,7 @@ export async function updateTodoItem(ctx: TenantContext, id: string, input: unkn
   if (res.count === 0) throw notFound("Görev bulunamadı.");
   // Assigned or reassigned to someone new: tell the assignee (after the write).
   if (data.assigneeId && data.assigneeId !== item.assigneeId) {
+    await autoSubscribe(ctx, { type: "todo", id: item.id }, [data.assigneeId]);
     await notifyTodoAssigned(ctx, {
       id: item.id,
       title: data.title ?? item.title,

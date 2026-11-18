@@ -16,6 +16,7 @@ import type { TenantContext } from "@/lib/tenant-context";
 import { eventActivityPath, forgetActivity, recordActivity } from "@/server/activity";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { notifyEventCreated } from "@/server/notifications";
+import { autoSubscribe } from "@/server/subscriptions";
 
 const optionalText = (max: number, label: string) =>
   z
@@ -156,6 +157,7 @@ export async function createEvent(ctx: TenantContext, input: unknown): Promise<E
   const event = await db.event.create({
     data: { ...data, workspaceId: ctx.workspaceId, createdById: ctx.userId },
   });
+  await autoSubscribe(ctx, { type: "event", id: event.id }, [ctx.userId]);
   await notifyEventCreated(ctx, event); // after the main write; never throws
   await recordActivity(ctx, {
     type: "EVENT_CREATED",

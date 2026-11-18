@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Pin } from "lucide-react";
 
 import { CommentThread } from "@/components/comments/comment-thread";
+import { SubscribeToggle } from "@/components/subscriptions/subscribe-toggle";
 import { PostControls } from "@/components/messages/post-controls";
 import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import { requireWorkspace } from "@/lib/tenant";
 import { isServiceError } from "@/server/errors";
 import { listMentionCandidates, mentionNames } from "@/server/comments";
 import { getPostHeader } from "@/server/messages";
+import { isSubscribed, countSubscribers } from "@/server/subscriptions";
 
 export const metadata: Metadata = { title: "Mesaj" };
 
@@ -35,7 +37,13 @@ export default async function PostPage({
     throw e;
   }
 
-  const [members, names] = await Promise.all([listMentionCandidates(ctx), mentionNames(ctx, [post.body])]);
+  const subject = { type: "post" as const, id: post.id };
+  const [members, names, subscribed, subscribers] = await Promise.all([
+    listMentionCandidates(ctx),
+    mentionNames(ctx, [post.body]),
+    isSubscribed(ctx, subject),
+    countSubscribers(ctx, subject),
+  ]);
   const edited = post.updatedAt.getTime() - post.createdAt.getTime() > 1000;
 
   return (
@@ -81,6 +89,8 @@ export default async function PostPage({
         >
           <Markdown text={post.body} className="text-base" mentions={names} />
         </PostControls>
+
+        <SubscribeToggle slug={slug} subject={subject} subscribed={subscribed} count={subscribers} />
       </article>
 
       <CommentThread slug={slug} ctx={ctx} subject={{ type: "post", id: post.id }} />

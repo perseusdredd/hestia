@@ -46,6 +46,7 @@ model User {
   notificationsActed Notification[] @relation("NotificationActor")
   authTokens         AuthToken[]
   activities         Activity[]
+  subscriptions      Subscription[]
 }
 
 model Account {
@@ -116,6 +117,7 @@ model Workspace {
   uploadKeys    UploadKey[]
   notifications Notification[]
   activities    Activity[]
+  subscriptions Subscription[]
 }
 
 model Membership {
@@ -425,6 +427,24 @@ model Notification {
 
   @@index([userId, workspaceId, readAt])
   @@index([userId, createdAt])
+}
+
+// A member following a post, to-do or event: gets its comment notifications.
+// subjectType is "post" | "todo" | "event"; there is no FK to the subject
+// (it is polymorphic), the service validates it inside the workspace.
+model Subscription {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  subjectType String
+  subjectId   String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, subjectType, subjectId])
+  @@index([workspaceId, subjectType, subjectId])
 }
 
 // ------------------------------------------------------ Email and tokens ----

@@ -13,6 +13,7 @@ import {
   NOTIFICATION_TITLE_MAX,
   type NotificationType,
 } from "@/server/notifications";
+import { autoSubscribe, ensureSubscribers, listSubscriberIds } from "@/server/subscriptions";
 
 /**
  * Comments on every kind of subject: message-board posts, to-dos, documents
@@ -282,10 +283,11 @@ export async function notifyMentions(
 }
 
 /**
- * A new comment: the subject's followers (post/document author, to-do creator
- * and assignee, event creator) plus everyone who commented before, minus the
- * members mentioned in this comment (they get a MENTION instead), then one
- * MENTION per mentioned member. Never throws.
+ * A new comment: the item's subscribers (documents have no subscribers, so
+ * they keep their author plus earlier commenters), minus the members mentioned
+ * in this comment (they get a MENTION instead), then one MENTION per mentioned
+ * member. The commenter and the mentioned members become subscribers.
+ * Never throws.
  */
 async function notifyNewComment(
   ctx: TenantContext,
@@ -304,9 +306,15 @@ async function notifyNewComment(
       resolveMentionedMembers(ctx, comment.body),
     ]);
     const mentionedSet = new Set(mentioned);
-    const followers = [...subject.ownerIds, ...earlier.map((c) => c.authorId)].filter(
-      (id) => !mentionedSet.has(id),
-    );
+    let followers = [...subject.ownerIds, ...earlier.map((c) => c.authorId)];
+    if (subject.type !== "document") {
+      const sub = { type: subject.type, id: subject.id };
+      // Items from before subscriptions existed: seed owners + earlier commenters once.
+      await ensureSubscribers(ctx, sub, followers);
+      await autoSubscribe(ctx, sub, [ctx.userId, ...mentioned]);
+      followers = await listSubscriberIds(ctx, sub);
+    }
+    followers = followers.filter((id) => !mentionedSet.has(id));
     const names = await mentionNames(ctx, [comment.body]);
     await deliver(ctx, {
       recipientIds: followers,
