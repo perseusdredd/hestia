@@ -202,7 +202,12 @@ export async function syncActivityInternal(ctx: Pick<TenantContext, "workspaceId
         await commentsOf("todoItemId", itemIds, internal);
         return;
       }
-      case "todoItem":
+      case "todoItem": {
+        const internal = await subjectInternal(workspaceId, subject);
+        await markSubjects(workspaceId, "todoItem", [id], internal);
+        await commentsOf("todoItemId", [id], internal);
+        return;
+      }
       case "file":
       case "comment": {
         await markSubjects(workspaceId, subject.type, [id], await subjectInternal(workspaceId, subject));

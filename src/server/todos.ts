@@ -766,6 +766,8 @@ export async function moveTodoItem(ctx: TenantContext, id: string, input: unknow
     // Sections belong to one list: the moved item leaves its section.
     await tx.todoItem.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data: { sectionId: null } });
   });
+  // The item now inherits another list's team-only flag: re-derive its feed rows and its comments'.
+  if (targetListId) await syncActivityInternal(ctx, { type: "todoItem", id });
 }
 
 /** Moves a list one step up/down among the workspace's lists. Same permission as editing the list. */

@@ -157,7 +157,12 @@ async function findFolder(client: Tx | typeof db, ctx: TenantContext, id: string
 
 /** Marks a folder, its subfolders and the documents in them internal (a folder made team-only hides everything below it). */
 async function cascadeInternal(tx: Tx, ctx: TenantContext, folderId: string) {
-  const ids = [folderId, ...(await descendantFolders(tx, ctx, folderId)).map((d) => d.id)];
+  // Trashed subfolders count too: restoring one must not bring back a visible folder under an internal one.
+  const ids = [folderId];
+  for (let i = 0; i < ids.length && ids.length < 5000; i++) {
+    const kids = await tx.folder.findMany({ where: { workspaceId: ctx.workspaceId, parentId: ids[i] }, select: { id: true } });
+    for (const k of kids) if (!ids.includes(k.id)) ids.push(k.id);
+  }
   await tx.folder.updateMany({ where: { workspaceId: ctx.workspaceId, id: { in: ids } }, data: { internal: true } });
   // Raw: updateMany would bump updatedAt, which is the "last edited" date.
   await tx.$executeRaw`UPDATE "Document" SET internal = true
@@ -467,7 +472,12 @@ export async function setFolderInternal(ctx: TenantContext, input: unknown) {
     const found = await findFolder(tx, ctx, data.id);
     if (!canModify(ctx, found.createdById)) throw forbidden();
     if (data.internal) await cascadeInternal(tx, ctx, found.id);
-    else await tx.folder.update({ where: { id: found.id }, data: { internal: false } });
+    else if (
+      found.parentId &&
+      (await tx.folder.findFirst({ where: { id: found.parentId, workspaceId: ctx.workspaceId, internal: true }, select: { id: true } }))
+    ) {
+      throw new ServiceError("VALIDATION", "Üst klasör yalnızca ekibe açık. Önce üst klasörü misafirlere açın.");
+    } else await tx.folder.update({ where: { id: found.id }, data: { internal: false } });
     return found;
   });
   if (folder.internal !== data.internal) await syncActivityInternal(ctx, { type: "folder", id: folder.id });
@@ -625,6 +635,11 @@ export async function restoreFolderTree(ctx: TenantContext, folderId: string) {
           AND "deletedById" IS NOT DISTINCT FROM ${folder.deletedById}`,
       tx.folder.updateMany({ where: together, data: cleared }),
     ]);
+    // Back under a parent that became team-only meanwhile: stay team-only, with everything inside.
+    if (!folder.internal && folder.parentId) {
+      const parent = await tx.folder.findFirst({ where: { id: folder.parentId, workspaceId: ctx.workspaceId }, select: { internal: true } });
+      if (parent?.internal) await cascadeInternal(tx, ctx, folder.id);
+    }
     return { folder, restoredFolders: folders.count, restoredFiles: files.count, restoredDocuments: Number(documents) };
   });
 }

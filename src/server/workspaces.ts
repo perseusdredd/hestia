@@ -455,6 +455,11 @@ export async function changeMemberRole(ctx: TenantContext, membershipId: string,
       await revokeInvitesSentBy(tx, ctx.workspaceId, target.userId, role);
     }
     changed = true;
+    if (role === "GUEST") {
+      // Demoted to client: what was delivered while a full member (internal
+      // titles, comment excerpts, chat/check-in notices) must not outlive the role.
+      await tx.notification.deleteMany({ where: { workspaceId: ctx.workspaceId, userId: target.userId } });
+    }
     return tx.membership.update({ where: { id: target.id }, data: { role } });
   });
   if (changed) await recordRoleChanged(ctx, updated); // after commit; never throws

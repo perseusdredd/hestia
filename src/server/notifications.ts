@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { istanbulDayKey } from "@/lib/istanbul-time";
+import { isGuest } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { notFound, parseInput, ServiceError } from "@/server/errors";
 
@@ -345,6 +346,73 @@ function scope(ctx: TenantContext): Prisma.NotificationWhereInput {
   return { userId: ctx.userId, workspaceId: ctx.workspaceId };
 }
 
+/** Types that only ever concern the team: a guest never sees them, even from before a demotion. */
+const GUEST_HIDDEN_TYPES = ["CHAT_DM", "CHECKIN", "MEMBER_JOINED"];
+
+type PathKind = "post" | "todo" | "doc" | "event";
+
+/** Which team-visibility-bearing subject a notification path points at (null = none). */
+function pathTarget(path: string): { kind: PathKind; id: string } | null {
+  const clean = path.split(/[?#]/)[0];
+  const rules: Array<[RegExp, PathKind]> = [
+    [/^messages\/([A-Za-z0-9_-]+)$/, "post"],
+    [/^todos\/([A-Za-z0-9_-]+)$/, "todo"],
+    [/^files\/docs\/([A-Za-z0-9_-]+)$/, "doc"],
+    [/^calendar\/([A-Za-z0-9_-]+)$/, "event"],
+  ];
+  for (const [re, kind] of rules) {
+    const m = clean.match(re);
+    if (m) return { kind, id: m[1] };
+  }
+  return null;
+}
+
+/**
+ * The caller's notifications as the caller may see them. A GUEST additionally
+ * loses team-only types and every notification whose target (post, to-do,
+ * document, event) is team-only right now, so an item flipped to internal
+ * after the notification went out disappears from the bell too.
+ */
+async function visibleScope(ctx: TenantContext): Promise<Prisma.NotificationWhereInput> {
+  const base = scope(ctx);
+  if (!isGuest(ctx.role)) return base;
+  const rows = await db.notification.findMany({
+    where: { ...base, type: { notIn: GUEST_HIDDEN_TYPES } },
+    select: { path: true },
+    distinct: ["path"],
+  });
+  const targets = rows.map((r) => ({ path: r.path, t: pathTarget(r.path) })).filter((r) => r.t !== null);
+  const idsOf = (kind: PathKind) => targets.filter((r) => r.t!.kind === kind).map((r) => r.t!.id);
+  const workspaceId = ctx.workspaceId;
+  const [postIds, todoIds, docIds, eventIds] = [idsOf("post"), idsOf("todo"), idsOf("doc"), idsOf("event")];
+  const [posts, todos, docs, events] = await Promise.all([
+    postIds.length ? db.post.findMany({ where: { workspaceId, id: { in: postIds }, internal: false }, select: { id: true } }) : [],
+    todoIds.length
+      ? db.todoItem.findMany({ where: { workspaceId, id: { in: todoIds }, list: { internal: false } }, select: { id: true } })
+      : [],
+    docIds.length
+      ? db.document.findMany({
+          where: { workspaceId, id: { in: docIds }, internal: false, OR: [{ folderId: null }, { folder: { internal: false } }] },
+          select: { id: true },
+        })
+      : [],
+    eventIds.length ? db.event.findMany({ where: { workspaceId, id: { in: eventIds }, internal: false }, select: { id: true } }) : [],
+  ]);
+  // Anything not found as visible (internal, deleted or gone) is hidden.
+  const visible: Record<PathKind, Set<string>> = {
+    post: new Set(posts.map((r) => r.id)),
+    todo: new Set(todos.map((r) => r.id)),
+    doc: new Set(docs.map((r) => r.id)),
+    event: new Set(events.map((r) => r.id)),
+  };
+  const hidden = targets.filter((r) => !visible[r.t!.kind].has(r.t!.id)).map((r) => r.path);
+  return {
+    ...base,
+    type: { notIn: GUEST_HIDDEN_TYPES },
+    ...(hidden.length ? { path: { notIn: hidden } } : {}),
+  };
+}
+
 /** The caller's own notifications in this workspace, newest first (keyset pagination). */
 export async function listNotifications(
   ctx: TenantContext,
@@ -354,7 +422,7 @@ export async function listNotifications(
   const take = opts.take ?? NOTIFICATIONS_PAGE_SIZE;
   const after = opts.cursor ? decodeCursor(opts.cursor) : null;
   const where: Prisma.NotificationWhereInput = {
-    ...scope(ctx),
+    ...(await visibleScope(ctx)),
     ...(opts.unreadOnly ? { readAt: null } : {}),
     ...(after
       ? {
@@ -391,7 +459,7 @@ export async function listNotifications(
 }
 
 export async function unreadCount(ctx: TenantContext): Promise<number> {
-  return db.notification.count({ where: { ...scope(ctx), readAt: null } });
+  return db.notification.count({ where: { ...(await visibleScope(ctx)), readAt: null } });
 }
 
 /**
@@ -401,7 +469,7 @@ export async function unreadCount(ctx: TenantContext): Promise<number> {
 export async function markRead(ctx: TenantContext, id: string): Promise<{ id: string; path: string }> {
   const notificationId = parseInput(idSchema, id);
   const row = await db.notification.findFirst({
-    where: { ...scope(ctx), id: notificationId },
+    where: { ...(await visibleScope(ctx)), id: notificationId },
     select: { id: true, path: true, readAt: true },
   });
   if (!row) throw notFound("Bildirim bulunamadı.");
