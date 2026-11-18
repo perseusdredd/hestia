@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { db } from "@/lib/db";
 import {
@@ -58,6 +58,24 @@ describe("runDueCheckins", () => {
     expect(notes.map((x) => x.userId).sort()).toEqual([admin.userId, member.userId].sort());
     expect(notes[0].title).toBe("Otomatik kontrol: Bu hafta ne yapıyorsunuz?");
     expect(notes[0].path).toBe("checkins");
+  });
+
+  it("isolates a failing question so the rest of the run still gets their round", async () => {
+    // 11:00Z Wed = 14:00 Istanbul (weekday 3); hour 14 is used by no other test,
+    // so only these two questions are due at this instant.
+    const WED_14 = new Date("2026-11-18T11:00:00Z");
+    const a = (await createTestWorkspace((await createTestUser()).id)).ctx;
+    const b = (await createTestWorkspace((await createTestUser()).id)).ctx;
+    const qa = await createQuestion(a, { text: "A sorusu", weekdays: [3], hour: 14 });
+    const qb = await createQuestion(b, { text: "B sorusu", weekdays: [3], hour: 14 });
+
+    // The first round create (qa, created earliest) throws a non-P2002 error.
+    const spy = vi.spyOn(db.checkinRound, "create").mockRejectedValueOnce(new Error("boom"));
+    await expect(runDueCheckins(WED_14)).resolves.toBeGreaterThanOrEqual(1);
+    spy.mockRestore();
+
+    expect(await roundsOf(qa.id)).toHaveLength(0); // failed, skipped
+    expect(await roundsOf(qb.id)).toHaveLength(1); // still created
   });
 
   it("does not duplicate a round on a second run in the same hour", async () => {

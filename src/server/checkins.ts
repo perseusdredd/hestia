@@ -106,8 +106,12 @@ export async function runDueCheckins(now: Date): Promise<number> {
     try {
       await db.checkinRound.create({ data: { workspaceId: q.workspaceId, questionId: q.id, dateKey } });
     } catch (e) {
+      // Already created today (idempotent): skip quietly.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") continue;
-      throw e;
+      // One question's failure must not abort the whole run: other questions,
+      // in other workspaces, still get their round this hour.
+      console.error("[checkins] runDueCheckins: round create failed:", e instanceof Error ? e.message : e);
+      continue;
     }
     created++;
     await notifyRound(q);
