@@ -42,6 +42,7 @@ model User {
   filesUploaded   File[]
   documents       Document[]
   eventsCreated   Event[]
+  eventInvites    EventInvitee[]
   chatMessages    ChatMessage[] @relation("ChatAuthor")
   chatReceived    ChatMessage[] @relation("ChatRecipient")
   notifications      Notification[] @relation("NotificationRecipient")
@@ -121,6 +122,7 @@ model Workspace {
   files        File[]
   documents    Document[]
   events       Event[]
+  eventInvitees EventInvitee[]
   chatMessages ChatMessage[]
   uploadKeys    UploadKey[]
   notifications Notification[]
@@ -413,13 +415,33 @@ model Event {
   // Soft delete: set while the row is in the trash (purged after 30 days by the cleanup cron).
   deletedAt   DateTime?
   deletedById String?
+  // Recurrence: NONE | DAILY | WEEKLY | MONTHLY. startsAt/endsAt describe the first occurrence;
+  // recurrenceUntil (inclusive, end of an Istanbul day) caps the series, null = open-ended.
+  recurrence      String    @default("NONE")
+  recurrenceUntil DateTime?
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User           @relation(fields: [createdById], references: [id], onDelete: Cascade)
   comments  Comment[]
+  invitees  EventInvitee[]
 
   @@index([workspaceId, startsAt])
   @@index([workspaceId, deletedAt])
+}
+
+model EventInvitee {
+  id          String   @id @default(cuid())
+  workspaceId String
+  eventId     String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  event     Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([workspaceId, userId])
 }
 
 // ---------------------------------------------------------------- Chat ----

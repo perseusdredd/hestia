@@ -14,11 +14,16 @@ function readEvent(formData: FormData) {
     allDay: formString(formData, "allDay") === "on",
     startsAt: formString(formData, "startsAt"),
     endsAt: formString(formData, "endsAt"),
+    recurrence: formString(formData, "recurrence") || undefined,
+    recurrenceUntil: formString(formData, "recurrenceUntil"),
+    inviteeIds: formData.getAll("inviteeIds").map(String),
   };
 }
 
 function toValues(v: ReturnType<typeof readEvent>): Record<string, string> {
-  return { ...v, allDay: v.allDay ? "on" : "" };
+  const { inviteeIds: _inviteeIds, recurrence, ...rest } = v;
+  void _inviteeIds;
+  return { ...rest, recurrence: recurrence ?? "NONE", allDay: v.allDay ? "on" : "" };
 }
 
 export async function createEventAction(

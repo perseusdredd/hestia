@@ -5,11 +5,13 @@ import { tr } from "date-fns/locale";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { CalendarView } from "@/components/calendar/calendar-view";
-import type { CalDay, CalEvent } from "@/components/calendar/types";
+import type { CalDay, CalEvent, CalMember } from "@/components/calendar/types";
 import { PageHeader } from "@/components/page-header";
 import { buttonVariants } from "@/components/ui/button";
+import { displayName } from "@/components/user-avatar";
 import { requireWorkspace } from "@/lib/tenant";
-import { listMonth } from "@/server/calendar";
+import { listMemberUsers } from "@/server/workspaces";
+import { listInviteeIdsByEvent, listMonth } from "@/server/calendar";
 import { countComments } from "@/server/comments";
 import {
   eventDayKeys,
@@ -39,37 +41,44 @@ export default async function CalendarPage({
   const raw = Array.isArray(monthParam) ? monthParam[0] : monthParam;
   const month = isMonthParam(raw) ? raw : currentMonth;
 
-  const { grid, events, todos } = await listMonth(ctx, month);
-  const commentCounts = await countComments(
-    ctx,
-    "event",
-    events.map((e) => e.id),
-  );
+  const { grid, events, occurrences, todos } = await listMonth(ctx, month);
+  const eventIds = events.map((e) => e.id);
+  const [commentCounts, inviteeIds, memberUsers] = await Promise.all([
+    countComments(ctx, "event", eventIds),
+    listInviteeIdsByEvent(ctx, eventIds),
+    listMemberUsers(ctx),
+  ]);
+  const members: CalMember[] = memberUsers.map((u) => ({ id: u.id, label: displayName(u) }));
 
-  const calEvents: CalEvent[] = events.map((e) => ({
+  const calEvents: CalEvent[] = occurrences.map(({ event: e, startsAt, endsAt, index }) => ({
     id: e.id,
+    key: e.recurrence === "NONE" ? e.id : `${e.id}~${index}`,
     title: e.title,
     description: e.description ?? "",
     location: e.location ?? "",
     allDay: e.allDay,
     start: toIstanbulInputValue(e.startsAt, !e.allDay),
     end: toIstanbulInputValue(e.endsAt, !e.allDay),
-    startTime: e.allDay ? null : istanbulTime(e.startsAt),
-    endTime: e.allDay ? null : istanbulTime(e.endsAt),
-    startKey: istanbulDayKey(e.startsAt),
-    endKey: istanbulDayKey(e.endsAt),
+    recurrence: e.recurrence,
+    recurrenceUntil: e.recurrenceUntil ? istanbulDayKey(e.recurrenceUntil) : "",
+    inviteeIds: inviteeIds[e.id] ?? [],
+    startTime: e.allDay ? null : istanbulTime(startsAt),
+    endTime: e.allDay ? null : istanbulTime(endsAt),
+    startKey: istanbulDayKey(startsAt),
+    endKey: istanbulDayKey(endsAt),
     canEdit: e.canEdit,
     commentCount: commentCounts[e.id] ?? 0,
   }));
 
   const eventsByDay = new Map<string, string[]>();
-  for (const e of events) {
-    for (const key of eventDayKeys(e.startsAt, e.endsAt)) {
+  calEvents.forEach((ce, i) => {
+    const o = occurrences[i];
+    for (const key of eventDayKeys(o.startsAt, o.endsAt)) {
       const list = eventsByDay.get(key) ?? [];
-      list.push(e.id);
+      list.push(ce.key);
       eventsByDay.set(key, list);
     }
-  }
+  });
   const todosByDay = new Map<string, CalDay["todos"]>();
   for (const t of todos) {
     if (!t.dueDate) continue;
@@ -99,6 +108,7 @@ export default async function CalendarPage({
         slug={slug}
         days={days}
         events={calEvents}
+        members={members}
         todayKey={todayKey}
         defaultDayKey={defaultDayKey}
         toolbar={

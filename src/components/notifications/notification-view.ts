@@ -3,6 +3,7 @@ import {
   Bell,
   CalendarClock,
   CalendarDays,
+  CalendarPlus,
   CheckSquare,
   MessageCircle,
   MessageSquare,
@@ -48,6 +49,7 @@ const ICONS: Record<string, LucideIcon> = {
   MEMBER_JOINED: UserPlus,
   CHAT_DM: MessageSquare,
   CHECKIN: CalendarClock,
+  EVENT_INVITE: CalendarPlus,
 };
 
 export function notificationIcon(type: string): LucideIcon {

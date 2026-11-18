@@ -34,6 +34,8 @@ export const NOTIFICATION_TYPES = [
   "CHAT_DM",
   /** A scheduled automatic check-in question. */
   "CHECKIN",
+  /** You were invited to a calendar event. */
+  "EVENT_INVITE",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -228,9 +230,13 @@ export function notifyPostComment(
 export function notifyEventCreated(
   ctx: TenantContext,
   event: { id: string; title: string; startsAt: Date },
+  /** Members who get a more specific notification (e.g. EVENT_INVITE) instead. */
+  excludeIds: string[] = [],
 ): Promise<number> {
   return safely("notifyEventCreated", async () => {
-    const [actor, ids] = await Promise.all([actorLabel(ctx), memberIds(ctx)]);
+    const [actor, all] = await Promise.all([actorLabel(ctx), memberIds(ctx)]);
+    const skip = new Set(excludeIds);
+    const ids = all.filter((id) => !skip.has(id));
     const dayKey = istanbulDayKey(event.startsAt);
     return notify(ctx, {
       recipientIds: ids,
@@ -238,6 +244,24 @@ export function notifyEventCreated(
       title: `${actor} yeni bir etkinlik ekledi`,
       body: clip(event.title, NOTIFICATION_BODY_MAX),
       path: `calendar?month=${dayKey.slice(0, 7)}#agenda-${dayKey}`,
+    });
+  });
+}
+
+/** Members were invited to an event: only they are notified. */
+export function notifyEventInvited(
+  ctx: TenantContext,
+  event: { id: string; title: string; startsAt: Date },
+  inviteeIds: string[],
+): Promise<number> {
+  return safely("notifyEventInvited", async () => {
+    const actor = await actorLabel(ctx);
+    return notify(ctx, {
+      recipientIds: inviteeIds,
+      type: "EVENT_INVITE",
+      title: `${actor} sizi bir etkinliğe davet etti`,
+      body: clip(event.title, NOTIFICATION_BODY_MAX),
+      path: `calendar/${event.id}`,
     });
   });
 }

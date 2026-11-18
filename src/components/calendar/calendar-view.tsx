@@ -13,7 +13,7 @@ import { agendaTimeLabel } from "@/lib/event-labels";
 import { keyToCalendarDate } from "@/lib/istanbul-time";
 
 import { EventDialog, type DialogTarget } from "./event-dialog";
-import type { CalDay, CalEvent } from "./types";
+import type { CalDay, CalEvent, CalMember } from "./types";
 
 const WEEKDAYS = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
 const MAX_CHIPS = 3;
@@ -23,6 +23,7 @@ export function CalendarView({
   slug,
   days,
   events,
+  members,
   todayKey,
   defaultDayKey,
   toolbar,
@@ -30,6 +31,8 @@ export function CalendarView({
   slug: string;
   days: CalDay[];
   events: CalEvent[];
+  /** Workspace members, for the invitee picker. */
+  members: CalMember[];
   todayKey: string;
   /** Day pre-filled by the "Yeni etkinlik" button (today if in this month, else the 1st). */
   defaultDayKey: string;
@@ -38,9 +41,11 @@ export function CalendarView({
 }) {
   const [rawTarget, setTarget] = useState<DialogTarget>(null);
   const close = useCallback(() => setTarget(null), []);
-  const byId = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
+  // Keyed per occurrence: a recurring event appears once per day it falls on.
+  const byId = useMemo(() => new Map(events.map((e) => [e.key, e])), [events]);
+  const eventIds = useMemo(() => new Set(events.map((e) => e.id)), [events]);
   // An event deleted (here or by someone else) closes its dialog on the next refresh.
-  const target = rawTarget?.mode === "edit" && !byId.has(rawTarget.event.id) ? null : rawTarget;
+  const target = rawTarget?.mode === "edit" && !eventIds.has(rawTarget.event.id) ? null : rawTarget;
   const agenda = days.filter((d) => d.inMonth && (d.eventIds.length > 0 || d.todos.length > 0));
   const todosHref = `/w/${slug}/todos`;
 
@@ -129,7 +134,7 @@ export function CalendarView({
                 <div className="mt-1 space-y-0.5 sm:hidden" aria-hidden>
                   {dayEvents.slice(0, MAX_PHONE_BARS).map((e) => (
                     <span
-                      key={e.id}
+                      key={e.key}
                       className="block truncate rounded-[3px] bg-primary-soft px-1 text-[10px] leading-[15px] font-medium text-primary-text"
                     >
                       {e.title}
@@ -149,7 +154,7 @@ export function CalendarView({
                 <div className="mt-1 hidden space-y-0.5 sm:block">
                   {shown.map((e) => (
                     <button
-                      key={e.id}
+                      key={e.key}
                       type="button"
                       onClick={() => setTarget({ mode: "edit", event: e })}
                       title={e.title}
@@ -260,7 +265,7 @@ export function CalendarView({
         )}
       </section>
 
-      <EventDialog slug={slug} target={target} onClose={close} />
+      <EventDialog slug={slug} target={target} members={members} onClose={close} />
     </div>
   );
 }

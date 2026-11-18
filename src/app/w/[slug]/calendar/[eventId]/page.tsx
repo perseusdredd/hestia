@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarClock, MapPin } from "lucide-react";
+import { ArrowLeft, CalendarClock, Repeat, Users } from "lucide-react";
+import { MapPin } from "lucide-react";
 
 import { CommentThread } from "@/components/comments/comment-thread";
 import { BookmarkToggle } from "@/components/bookmarks/bookmark-toggle";
@@ -15,7 +16,8 @@ import { eventWhen } from "@/lib/event-labels";
 import { formatDateTime } from "@/lib/format";
 import { istanbulDayKey } from "@/lib/istanbul-time";
 import { requireWorkspace } from "@/lib/tenant";
-import { getEvent } from "@/server/calendar";
+import { RECURRENCE_LABELS, isRecurrence } from "@/lib/recurrence";
+import { getEvent, listEventInviteeIds } from "@/server/calendar";
 import { isServiceError } from "@/server/errors";
 import { isBookmarked } from "@/server/bookmarks";
 import { isSubscribed, countSubscribers } from "@/server/subscriptions";
@@ -45,12 +47,14 @@ export default async function EventPage({ params }: { params: Params }) {
   const { slug, eventId } = await params;
   const { ctx, event } = await load(slug, eventId);
   const subject = { type: "event" as const, id: event.id };
-  const [members, subscribed, subscribers, bookmarked] = await Promise.all([
+  const [members, subscribed, subscribers, bookmarked, inviteeIds] = await Promise.all([
     listMemberUsers(ctx),
     isSubscribed(ctx, subject),
     countSubscribers(ctx, subject),
     isBookmarked(ctx, subject),
+    listEventInviteeIds(ctx, event.id),
   ]);
+  const invitees = inviteeIds.flatMap((id) => members.find((m) => m.id === id) ?? []);
   const creator = members.find((m) => m.id === event.createdById) ?? null;
   const dayKey = istanbulDayKey(event.startsAt);
   const calendarHref = `/w/${slug}/calendar?month=${dayKey.slice(0, 7)}#agenda-${dayKey}`;
@@ -71,6 +75,15 @@ export default async function EventPage({ params }: { params: Params }) {
             <span className="inline-flex flex-wrap items-center gap-1.5">
               <CalendarClock className="size-4" aria-hidden />
               <span>{eventWhen(event)}</span>
+              {event.recurrence !== "NONE" && isRecurrence(event.recurrence) ? (
+                <>
+                  <Repeat className="ml-2 size-4" aria-hidden />
+                  <span>
+                    {RECURRENCE_LABELS[event.recurrence]}
+                    {event.recurrenceUntil ? ` · ${istanbulDayKey(event.recurrenceUntil)} tarihine kadar` : ""}
+                  </span>
+                </>
+              ) : null}
             </span>
           }
         />
@@ -82,6 +95,22 @@ export default async function EventPage({ params }: { params: Params }) {
                 <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 break-words">{event.location}</span>
               </p>
+            ) : null}
+            {invitees.length > 0 ? (
+              <div className="space-y-1.5">
+                <h2 className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Users className="size-3.5" aria-hidden />
+                  Davetliler ({invitees.length})
+                </h2>
+                <ul className="flex flex-wrap gap-2">
+                  {invitees.map((m) => (
+                    <li key={m.id} className="flex items-center gap-1.5 rounded-full border py-0.5 pr-2.5 pl-1 text-sm">
+                      <UserAvatar user={m} size="sm" />
+                      <span className="min-w-0 truncate">{displayName(m)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
             <div className="space-y-1">
               <h2 className="text-xs text-muted-foreground">Açıklama</h2>

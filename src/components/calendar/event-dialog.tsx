@@ -19,12 +19,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { NativeSelect } from "@/components/native-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { ActionState } from "@/lib/action-state";
+import { RECURRENCES, RECURRENCE_LABELS } from "@/lib/recurrence";
 
-import type { CalEvent } from "./types";
+import type { CalEvent, CalMember } from "./types";
 
 export type DialogTarget =
   | { mode: "create"; dayKey: string }
@@ -34,10 +36,12 @@ export type DialogTarget =
 export function EventDialog({
   slug,
   target,
+  members,
   onClose,
 }: {
   slug: string;
   target: DialogTarget;
+  members: CalMember[];
   onClose: () => void;
 }) {
   const event = target?.mode === "edit" ? target.event : null;
@@ -61,6 +65,7 @@ export function EventDialog({
               key={event?.id ?? `new-${target.mode === "create" ? target.dayKey : ""}`}
               slug={slug}
               event={event}
+              members={members}
               defaultDay={target.mode === "create" ? target.dayKey : null}
               readOnly={readOnly}
               onDone={onClose}
@@ -100,12 +105,14 @@ export function EventDialog({
 function EventForm({
   slug,
   event,
+  members,
   defaultDay,
   readOnly,
   onDone,
 }: {
   slug: string;
   event: CalEvent | null;
+  members: CalMember[];
   defaultDay: string | null;
   readOnly: boolean;
   onDone: () => void;
@@ -123,6 +130,8 @@ function EventForm({
     state.values?.startsAt ?? event?.start ?? (day ? `${day}T09:00` : ""),
   );
   const [end, setEnd] = useState(state.values?.endsAt ?? event?.end ?? (day ? `${day}T10:00` : ""));
+
+  const [recurrence, setRecurrence] = useState(state.values?.recurrence ?? event?.recurrence ?? "NONE");
 
   useEffect(() => {
     if (state.ok) {
@@ -205,6 +214,40 @@ function EventForm({
         </div>
       </div>
 
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="ev-recurrence">Tekrar</Label>
+          <NativeSelect
+            id="ev-recurrence"
+            name="recurrence"
+            disabled={readOnly}
+            value={recurrence}
+            onChange={(e) => setRecurrence(e.target.value)}
+          >
+            {RECURRENCES.map((r) => (
+              <option key={r} value={r}>
+                {RECURRENCE_LABELS[r]}
+              </option>
+            ))}
+          </NativeSelect>
+          <FieldError errors={fe?.recurrence} />
+        </div>
+        {recurrence !== "NONE" ? (
+          <div className="grid gap-1.5">
+            <Label htmlFor="ev-until">Tekrar bitişi (isteğe bağlı)</Label>
+            <Input
+              id="ev-until"
+              name="recurrenceUntil"
+              type="date"
+              disabled={readOnly}
+              defaultValue={v?.recurrenceUntil ?? event?.recurrenceUntil ?? ""}
+              aria-invalid={Boolean(fe?.recurrenceUntil)}
+            />
+            <FieldError errors={fe?.recurrenceUntil} />
+          </div>
+        ) : null}
+      </div>
+
       <div className="grid gap-1.5">
         <Label htmlFor="ev-location">Konum</Label>
         <div className="relative">
@@ -235,6 +278,26 @@ function EventForm({
         />
         <FieldError errors={fe?.description} />
       </div>
+
+      {members.length > 0 ? (
+        <fieldset className="grid gap-1.5" disabled={readOnly}>
+          <legend className="text-sm font-medium">Davetliler</legend>
+          <div className="grid max-h-32 gap-1 overflow-y-auto rounded-md border p-2">
+            {members.map((m) => (
+              <label key={m.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="inviteeIds"
+                  value={m.id}
+                  defaultChecked={event?.inviteeIds.includes(m.id) ?? false}
+                  className="size-4 accent-primary"
+                />
+                <span className="min-w-0 truncate">{m.label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
 
       <DialogFooter>
         <DialogClose render={<Button type="button" variant="outline" />}>
