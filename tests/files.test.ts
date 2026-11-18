@@ -43,6 +43,8 @@ import {
   updateDocument,
 } from "@/server/files";
 
+import { purgeTrashItem, restoreTrashItem } from "@/server/trash";
+
 import { cleanup, createMember, createTestUser, createTestWorkspace, disconnect } from "./helpers";
 
 let root: string;
@@ -270,7 +272,12 @@ describe("uploads", () => {
     });
 
     await deleteFile(ctxA, file.id, storage);
+    // Soft delete: the row sits in the trash and the object stays until it is purged.
+    expect(await db.file.count({ where: { storageKey: file.storageKey, deletedAt: null } })).toBe(0);
+    expect(await storage.head(file.storageKey)).not.toBeNull();
+    await purgeTrashItem(ctxA, { kind: "file", id: file.id }, storage);
     expect(await db.file.count({ where: { storageKey: file.storageKey } })).toBe(0);
+    expect(await storage.head(file.storageKey)).toBeNull();
     // Deleting the File keeps its UploadKey row.
     expect(await db.uploadKey.count({ where: { storageKey: file.storageKey } })).toBe(1);
 
@@ -318,7 +325,7 @@ describe("uploads", () => {
       Array.from({ length: 3 }, () => completeUpload(ctxA, token, storage)),
     );
     expect(results.every((r) => r.status === "rejected")).toBe(true);
-    expect(await db.file.count({ where: { storageKey: file.storageKey } })).toBe(0);
+    expect(await db.file.count({ where: { storageKey: file.storageKey, deletedAt: null } })).toBe(0);
   });
 
   it("UploadKey rows are workspace-scoped and survive folder deletes", async () => {
@@ -428,7 +435,7 @@ describe("folder tree", () => {
     await expect(createFolder(ctxA, { name: "fatura" })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  it("deletes a folder recursively, including files, documents and storage objects", async () => {
+  it("trashes a folder recursively; restoring brings the whole tree back, purging removes the objects", async () => {
     const top = await createFolder(ctxA, { name: "Silinecek" });
     const sub = await createFolder(ctxA, { name: "Alt", parentId: top.id });
     const deep = await createFolder(ctxA, { name: "Derin", parentId: sub.id });
@@ -439,6 +446,22 @@ describe("folder tree", () => {
 
     const res = await deleteFolder(ctxA, top.id, storage);
     expect(res).toMatchObject({ deletedFolders: 3, deletedFiles: 2, deletedDocuments: 1 });
+    const live = { deletedAt: null };
+    expect(await db.folder.count({ where: { id: { in: [top.id, sub.id, deep.id] }, ...live } })).toBe(0);
+    expect(await db.file.count({ where: { id: { in: [f1.id, f2.id] }, ...live } })).toBe(0);
+    expect(await db.document.count({ where: { id: d1.id, ...live } })).toBe(0);
+    // Trashed, not removed: the objects are still there.
+    expect(await storage.head(f1.storageKey)).not.toBeNull();
+    expect(await storage.head(f2.storageKey)).not.toBeNull();
+    expect(await storage.head(keep.storageKey)).not.toBeNull();
+
+    await restoreTrashItem(ctxA, { kind: "folder", id: top.id });
+    expect(await db.folder.count({ where: { id: { in: [top.id, sub.id, deep.id] }, ...live } })).toBe(3);
+    expect(await db.file.count({ where: { id: { in: [f1.id, f2.id] }, ...live } })).toBe(2);
+    expect(await db.document.count({ where: { id: d1.id, ...live } })).toBe(1);
+
+    await deleteFolder(ctxA, top.id, storage);
+    await purgeTrashItem(ctxA, { kind: "folder", id: top.id }, storage);
     expect(await db.folder.count({ where: { id: { in: [top.id, sub.id, deep.id] } } })).toBe(0);
     expect(await db.file.count({ where: { id: { in: [f1.id, f2.id] } } })).toBe(0);
     expect(await db.document.count({ where: { id: d1.id } })).toBe(0);
@@ -481,10 +504,10 @@ describe("permissions", () => {
     await updateDocument(adminA, { id: doc.id, title: "Düzenlendi", content: "y" });
     await deleteDocument(adminA, doc.id);
     await deleteFile(adminA, file.id, storage);
-    expect(await storage.head(file.storageKey)).toBeNull();
+    expect(await db.file.count({ where: { id: file.id, deletedAt: null } })).toBe(0);
     await deleteFolder(adminA, folder.id, storage);
-    expect(await db.folder.count({ where: { id: folder.id } })).toBe(0);
-    expect(await db.document.count({ where: { id: own.id } })).toBe(0);
+    expect(await db.folder.count({ where: { id: folder.id, deletedAt: null } })).toBe(0);
+    expect(await db.document.count({ where: { id: own.id, deletedAt: null } })).toBe(0);
   });
 
   it("validates input", async () => {

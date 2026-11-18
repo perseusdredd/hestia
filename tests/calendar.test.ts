@@ -197,11 +197,11 @@ describe("permissions", () => {
     );
 
     await deleteEvent(adminA, ev.id);
-    expect(await db.event.findUnique({ where: { id: ev.id } })).toBeNull();
+    expect(await db.event.findFirst({ where: { id: ev.id, deletedAt: null } })).toBeNull();
 
     const own = await createEvent(memberA2, base);
     await deleteEvent(memberA2, own.id);
-    expect(await db.event.findUnique({ where: { id: own.id } })).toBeNull();
+    expect(await db.event.findFirst({ where: { id: own.id, deletedAt: null } })).toBeNull();
   });
 });
 

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { purgeExpiredTrash, TRASH_RETENTION_DAYS, type TrashPurgeResult } from "@/server/trash";
 
 /**
  * Daily cleanup of rows that can no longer be used (GET /api/cron/cleanup).
@@ -11,6 +12,8 @@ import { db } from "@/lib/db";
  *    accepted invitations are kept.
  *  - EmailOutbox: created more than 30 days ago.
  *  - Notification: read, and created more than 90 days ago (unread ones stay).
+ *  - Trash: posts, to-dos, lists, events, files (and their stored objects),
+ *    documents and folders trashed more than 30 days ago (see trash.ts).
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -20,6 +23,7 @@ export const RETENTION_DAYS = {
   invitations: 30,
   emailOutbox: 30,
   readNotifications: 90,
+  trash: TRASH_RETENTION_DAYS,
 } as const;
 
 export type HousekeepingResult = {
@@ -27,6 +31,7 @@ export type HousekeepingResult = {
   invitations: number;
   emailOutbox: number;
   notifications: number;
+  trash: TrashPurgeResult;
 };
 
 function daysBefore(now: Date, days: number): Date {
@@ -53,10 +58,13 @@ export async function runHousekeeping(now: Date = new Date()): Promise<Housekeep
     where: { readAt: { not: null }, createdAt: { lt: notificationCutoff } },
   });
 
+  const trash = await purgeExpiredTrash(now);
+
   return {
     authTokens: authTokens.count,
     invitations: invitations.count,
     emailOutbox: emailOutbox.count,
     notifications: notifications.count,
+    trash,
   };
 }

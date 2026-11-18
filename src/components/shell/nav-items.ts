@@ -7,12 +7,13 @@ import {
   MessageSquare,
   MessagesSquare,
   Settings,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 
 export type NavItem = {
   /** Path segment under /w/[slug]; "" is the overview. */
-  segment: "" | "messages" | "todos" | "files" | "calendar" | "chat" | "activity" | "settings";
+  segment: "" | "messages" | "todos" | "files" | "calendar" | "chat" | "activity" | "trash" | "settings";
   label: string;
   icon: LucideIcon;
 };
@@ -26,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { segment: "calendar", label: "Takvim", icon: CalendarDays },
   { segment: "chat", label: "Sohbet", icon: MessagesSquare },
   { segment: "activity", label: "Akış", icon: Activity },
+  { segment: "trash", label: "Çöp kutusu", icon: Trash2 },
   { segment: "settings", label: "Ayarlar", icon: Settings },
 ];
 

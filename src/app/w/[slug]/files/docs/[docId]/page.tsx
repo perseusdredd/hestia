@@ -69,7 +69,7 @@ export default async function DocumentPage({ params }: { params: Params }) {
                 action={deleteDocumentAction.bind(null, slug)}
                 fields={{ id: document.id }}
                 title="Doküman silinsin mi?"
-                description="Doküman kalıcı olarak silinir. Bu işlem geri alınamaz."
+                description="Doküman çöp kutusuna taşınır; 30 gün içinde geri yüklenebilir."
                 confirmLabel="Sil"
                 triggerVariant="outline"
                 triggerSize="default"

@@ -12,6 +12,7 @@ import {
   MessageCircle,
   MessageSquare,
   RotateCcw,
+  Undo2,
   UserCog,
   UserMinus,
   UserPlus,
@@ -60,6 +61,7 @@ export const ACTIVITY_GROUP_LABELS: Record<ActivityGroup, string> = {
   todos: "Yapılacaklar",
   calendar: "Takvim",
   files: "Dosyalar",
+  trash: "Çöp kutusu",
   members: "Üyeler",
 };
 
@@ -82,6 +84,7 @@ const META: Record<string, Meta> = {
   DOCUMENT_CREATED: { icon: FilePlus, before: "bir doküman oluşturdu: " },
   DOCUMENT_UPDATED: { icon: FilePen, before: "bir dokümanı güncelledi: " },
   FOLDER_CREATED: { icon: FolderPlus, before: "bir klasör oluşturdu: " },
+  ITEM_RESTORED: { icon: Undo2, before: "çöp kutusundan geri yükledi: " },
   MEMBER_JOINED: { icon: UserPlus, before: "çalışma alanına katıldı", subject: false },
   MEMBER_LEFT: { icon: UserMinus, before: "çalışma alanından ayrıldı", subject: false },
   MEMBER_REMOVED: { icon: UserX, before: "bir üyeyi çalışma alanından çıkardı: " },

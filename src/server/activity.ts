@@ -36,6 +36,7 @@ export const ACTIVITY_TYPES = [
   "DOCUMENT_CREATED",
   "DOCUMENT_UPDATED",
   "FOLDER_CREATED",
+  "ITEM_RESTORED",
   "MEMBER_JOINED",
   "MEMBER_REMOVED",
   "MEMBER_LEFT",
@@ -49,6 +50,7 @@ export const ACTIVITY_GROUPS = {
   todos: ["TODO_LIST_CREATED", "TODO_CREATED", "TODO_COMPLETED", "TODO_REOPENED"],
   calendar: ["EVENT_CREATED", "EVENT_UPDATED"],
   files: ["FILE_UPLOADED", "DOCUMENT_CREATED", "DOCUMENT_UPDATED", "FOLDER_CREATED"],
+  trash: ["ITEM_RESTORED"],
   members: ["MEMBER_JOINED", "MEMBER_REMOVED", "MEMBER_LEFT", "MEMBER_ROLE_CHANGED"],
 } as const satisfies Record<string, readonly ActivityType[]>;
 export type ActivityGroup = keyof typeof ACTIVITY_GROUPS;
@@ -274,7 +276,7 @@ export async function forgetActivity(
 export function recordTodoToggled(ctx: TenantContext, itemId: string, done: boolean): Promise<boolean> {
   return safely("recordTodoToggled", async () => {
     const item = await db.todoItem.findFirst({
-      where: { id: itemId, workspaceId: ctx.workspaceId },
+      where: { id: itemId, workspaceId: ctx.workspaceId, deletedAt: null },
       select: { title: true },
     });
     if (!item) return false;

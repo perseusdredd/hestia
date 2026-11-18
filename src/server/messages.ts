@@ -86,7 +86,7 @@ export async function listPosts(
         ],
       }
     : null;
-  const where: Prisma.PostWhereInput = { workspaceId: ctx.workspaceId };
+  const where: Prisma.PostWhereInput = { workspaceId: ctx.workspaceId, deletedAt: null };
   if (after && olderThan) {
     where.OR = after.pinned
       ? [{ pinned: true, ...olderThan }, { pinned: false }]
@@ -122,7 +122,7 @@ export async function listPosts(
 export async function getPostHeader(ctx: TenantContext, postId: string) {
   const id = parseInput(idSchema, postId);
   const post = await db.post.findFirst({
-    where: { id, workspaceId: ctx.workspaceId },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
     include: { author: authorSelect },
   });
   if (!post) throw notFound("Gönderi bulunamadı.");
@@ -133,7 +133,7 @@ export async function getPostHeader(ctx: TenantContext, postId: string) {
 export async function getPost(ctx: TenantContext, postId: string) {
   const id = parseInput(idSchema, postId);
   const post = await db.post.findFirst({
-    where: { id, workspaceId: ctx.workspaceId },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
     include: {
       author: authorSelect,
       comments: {
@@ -200,7 +200,7 @@ async function notifyNewPost(ctx: TenantContext, post: { id: string; title: stri
 
 async function findPostInWorkspace(ctx: TenantContext, postId: string) {
   const id = parseInput(idSchema, postId);
-  const post = await db.post.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const post = await db.post.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
   if (!post) throw notFound("Gönderi bulunamadı.");
   return post;
 }
@@ -210,7 +210,7 @@ export async function updatePost(ctx: TenantContext, postId: string, input: unkn
   const post = await findPostInWorkspace(ctx, postId);
   if (!canModify(ctx, post.authorId)) throw forbidden("Bu gönderiyi düzenleme yetkiniz yok.");
   const res = await db.post.updateMany({
-    where: { id: post.id, workspaceId: ctx.workspaceId },
+    where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null },
     data,
   });
   if (res.count === 0) throw notFound("Gönderi bulunamadı.");
@@ -220,13 +220,18 @@ export async function updatePost(ctx: TenantContext, postId: string, input: unkn
   await notifyMentions(ctx, added, { title: data.title, path: postActivityPath(post.id), body: data.body, kind: "post" });
 }
 
+/** Moves the post to the trash (soft delete); restore it with restoreTrashItem. */
 export async function deletePost(ctx: TenantContext, postId: string) {
   const post = await findPostInWorkspace(ctx, postId);
   if (!canModify(ctx, post.authorId)) throw forbidden("Bu gönderiyi silme yetkiniz yok.");
   await db.$transaction(async (tx) => {
-    // Before the delete: the post's comments are found through their foreign key.
+    // The feed rows go now; restoring records a new "restored" row instead.
     await forgetActivity(ctx, [{ type: "post", id: post.id }], tx);
-    await tx.post.deleteMany({ where: { id: post.id, workspaceId: ctx.workspaceId } });
+    await tx.post.updateMany({
+      where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null },
+      // Keep updatedAt (it drives "(düzenlendi)").
+      data: { deletedAt: new Date(), deletedById: ctx.userId, updatedAt: post.updatedAt },
+    });
   });
 }
 
@@ -236,7 +241,7 @@ export async function setPostPinned(ctx: TenantContext, postId: string, pinned: 
   // Pinning is not an edit: keep updatedAt (which drives "(düzenlendi)")
   // instead of letting @updatedAt bump it.
   const res = await db.post.updateMany({
-    where: { id: post.id, workspaceId: ctx.workspaceId },
+    where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null },
     data: { pinned, updatedAt: post.updatedAt },
   });
   if (res.count === 0) throw notFound("Gönderi bulunamadı.");

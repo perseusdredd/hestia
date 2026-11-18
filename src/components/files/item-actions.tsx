@@ -178,8 +178,8 @@ function DeleteForm({
   );
   const description =
     item.kind === "folder"
-      ? "Klasör, içindeki tüm alt klasörler, dosyalar ve dokümanlarla birlikte kalıcı olarak silinir."
-      : "Bu işlem geri alınamaz.";
+      ? "Klasör, içindeki tüm alt klasörler, dosyalar ve dokümanlarla birlikte çöp kutusuna taşınır; 30 gün içinde geri yüklenebilir."
+      : "Çöp kutusuna taşınır; 30 gün içinde geri yüklenebilir.";
   return (
     <form action={formAction} className="grid gap-4">
       <DialogHeader>

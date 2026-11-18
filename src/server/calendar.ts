@@ -95,6 +95,7 @@ export async function listMonth(ctx: TenantContext, month: string) {
     db.event.findMany({
       where: {
         workspaceId: ctx.workspaceId,
+        deletedAt: null,
         startsAt: { lte: rangeEnd },
         endsAt: { gte: rangeStart },
       },
@@ -104,6 +105,7 @@ export async function listMonth(ctx: TenantContext, month: string) {
     db.todoItem.findMany({
       where: {
         workspaceId: ctx.workspaceId,
+        deletedAt: null,
         dueDate: {
           gte: new Date(`${grid.firstKey}T00:00:00.000Z`),
           lte: new Date(`${grid.lastKey}T00:00:00.000Z`),
@@ -136,7 +138,7 @@ export async function listUpcomingEvents(
   const now = opts.now ?? new Date();
   const until = istanbulDayEnd(addDaysToKey(istanbulDayKey(now), days));
   const events = await db.event.findMany({
-    where: { workspaceId: ctx.workspaceId, endsAt: { gte: now }, startsAt: { lte: until } },
+    where: { workspaceId: ctx.workspaceId, deletedAt: null, endsAt: { gte: now }, startsAt: { lte: until } },
     orderBy: [{ startsAt: "asc" }, { title: "asc" }],
     take,
   });
@@ -144,7 +146,7 @@ export async function listUpcomingEvents(
 }
 
 export async function getEvent(ctx: TenantContext, id: string): Promise<EventWithAccess> {
-  const event = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const event = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
   if (!event) throw notFound("Etkinlik bulunamadı.");
   return { ...event, canEdit: canModify(ctx, event.createdById) };
 }
@@ -166,12 +168,12 @@ export async function createEvent(ctx: TenantContext, input: unknown): Promise<E
 
 export async function updateEvent(ctx: TenantContext, id: string, input: unknown): Promise<Event> {
   const data = normalizeEventInput(input);
-  const existing = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const existing = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
   if (!existing) throw notFound("Etkinlik bulunamadı.");
   if (!canModify(ctx, existing.createdById)) {
     throw forbidden("Bu etkinliği yalnızca oluşturan kişi veya yöneticiler düzenleyebilir.");
   }
-  const res = await db.event.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data });
+  const res = await db.event.updateMany({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null }, data });
   if (res.count === 0) throw notFound("Etkinlik bulunamadı.");
   const event = await db.event.findFirstOrThrow({ where: { id, workspaceId: ctx.workspaceId } });
   await recordActivity(ctx, {
@@ -183,14 +185,18 @@ export async function updateEvent(ctx: TenantContext, id: string, input: unknown
   return event;
 }
 
+/** Moves the event to the trash (soft delete). */
 export async function deleteEvent(ctx: TenantContext, id: string): Promise<void> {
-  const existing = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const existing = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
   if (!existing) throw notFound("Etkinlik bulunamadı.");
   if (!canModify(ctx, existing.createdById)) {
     throw forbidden("Bu etkinliği yalnızca oluşturan kişi veya yöneticiler silebilir.");
   }
   await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "event", id: existing.id }], tx);
-    await tx.event.deleteMany({ where: { id: existing.id, workspaceId: ctx.workspaceId } });
+    await tx.event.updateMany({
+      where: { id: existing.id, workspaceId: ctx.workspaceId, deletedAt: null },
+      data: { deletedAt: new Date(), deletedById: ctx.userId, updatedAt: existing.updatedAt },
+    });
   });
 }

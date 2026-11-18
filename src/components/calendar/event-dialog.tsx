@@ -80,7 +80,7 @@ export function EventDialog({
                   action={deleteEventAction.bind(null, slug)}
                   fields={{ id: event.id }}
                   title="Etkinlik silinsin mi?"
-                  description={`"${event.title}" kalıcı olarak silinecek.`}
+                  description={`"${event.title}" çöp kutusuna taşınır; 30 gün içinde geri yüklenebilir.`}
                   confirmLabel="Sil"
                   successMessage="Etkinlik silindi."
                   onSuccess={onClose}

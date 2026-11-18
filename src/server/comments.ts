@@ -131,7 +131,7 @@ const SUBJECT_WORDS: Record<CommentSubjectType, { dative: string; locative: stri
 /** Validate `input` and load the subject row inside ctx's workspace (NOT_FOUND otherwise). */
 async function loadSubject(ctx: TenantContext, input: unknown): Promise<LoadedSubject> {
   const subject = parseInput(subjectSchema, input);
-  const where = { id: subject.id, workspaceId: ctx.workspaceId };
+  const where = { id: subject.id, workspaceId: ctx.workspaceId, deletedAt: null };
   let found: LoadedSubject | null = null;
   switch (subject.type) {
     case "post": {
@@ -141,7 +141,7 @@ async function loadSubject(ctx: TenantContext, input: unknown): Promise<LoadedSu
     }
     case "todo": {
       const row = await db.todoItem.findFirst({
-        where: { ...where, list: { workspaceId: ctx.workspaceId } },
+        where: { ...where, list: { workspaceId: ctx.workspaceId, deletedAt: null } },
         select: { id: true, title: true, createdById: true, assigneeId: true },
       });
       if (row) {

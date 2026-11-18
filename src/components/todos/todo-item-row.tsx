@@ -183,7 +183,7 @@ export const TodoItemRow = memo(function TodoItemRow({
             action={deleteItemAction.bind(null, slug)}
             fields={{ id: item.id }}
             title="Görev silinsin mi?"
-            description={`"${item.title}" kalıcı olarak silinecek.`}
+            description={`"${item.title}" çöp kutusuna taşınır; 30 gün içinde geri yüklenebilir.`}
             confirmLabel="Sil"
             trigger={<Trash2 aria-hidden />}
             triggerSize="icon-sm"
@@ -260,7 +260,7 @@ function DeleteItemForm({ slug, item, onDone }: { slug: string; item: TodoItemDT
     <form action={formAction} className="grid gap-4">
       <DialogHeader>
         <DialogTitle>Görev silinsin mi?</DialogTitle>
-        <DialogDescription>{`"${item.title}" kalıcı olarak silinecek.`}</DialogDescription>
+        <DialogDescription>{`"${item.title}" çöp kutusuna taşınır; 30 gün içinde geri yüklenebilir.`}</DialogDescription>
       </DialogHeader>
       <input type="hidden" name="id" value={item.id} />
       <FormError message={state.ok ? undefined : state.error} />

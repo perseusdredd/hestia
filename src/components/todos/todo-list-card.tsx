@@ -171,7 +171,7 @@ export function TodoListCard({
                 action={deleteListAction.bind(null, slug)}
                 fields={{ id: list.id }}
                 title="Liste silinsin mi?"
-                description={`"${list.name}" ve içindeki ${list.total} görev kalıcı olarak silinecek.`}
+                description={`"${list.name}" ve içindeki ${list.total} görev çöp kutusuna taşınır; 30 gün içinde geri yüklenebilir.`}
                 confirmLabel="Listeyi sil"
                 trigger={<Trash2 aria-hidden />}
                 triggerSize="icon-sm"

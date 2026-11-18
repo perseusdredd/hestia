@@ -219,6 +219,7 @@ export async function searchWorkspace(
       const rows = await db.post.findMany({
         where: {
           workspaceId,
+          deletedAt: null,
           OR: anyFieldContains<Prisma.PostWhereInput>(["title", "body"], variants),
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -246,10 +247,10 @@ export async function searchWorkspace(
             // The subject (whichever of the four it is) must be in the same workspace too.
             {
               OR: [
-                { post: { workspaceId } },
-                { todoItem: { workspaceId } },
-                { document: { workspaceId } },
-                { event: { workspaceId } },
+                { post: { workspaceId, deletedAt: null } },
+                { todoItem: { workspaceId, deletedAt: null } },
+                { document: { workspaceId, deletedAt: null } },
+                { event: { workspaceId, deletedAt: null } },
               ],
             },
             { OR: anyFieldContains<Prisma.CommentWhereInput>(["body"], variants) },
@@ -291,7 +292,8 @@ export async function searchWorkspace(
       const rows = await db.todoItem.findMany({
         where: {
           workspaceId,
-          list: { workspaceId },
+          deletedAt: null,
+          list: { workspaceId, deletedAt: null },
           OR: anyFieldContains<Prisma.TodoItemWhereInput>(["title", "notes"], variants),
         },
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -323,6 +325,7 @@ export async function searchWorkspace(
       const rows = await db.todoList.findMany({
         where: {
           workspaceId,
+          deletedAt: null,
           OR: anyFieldContains<Prisma.TodoListWhereInput>(["name"], variants),
         },
         orderBy: [{ position: "asc" }, { id: "asc" }],
@@ -333,7 +336,7 @@ export async function searchWorkspace(
           description: true,
           createdAt: true,
           createdBy: authorSelect,
-          _count: { select: { items: true } },
+          _count: { select: { items: { where: { deletedAt: null } } } },
         },
       });
       return rows.map((r) => ({
@@ -353,6 +356,7 @@ export async function searchWorkspace(
       const rows = await db.document.findMany({
         where: {
           workspaceId,
+          deletedAt: null,
           OR: anyFieldContains<Prisma.DocumentWhereInput>(["title", "content"], variants),
         },
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -384,6 +388,7 @@ export async function searchWorkspace(
         where: {
           workspaceId,
           fromChat: false,
+          deletedAt: null,
           OR: anyFieldContains<Prisma.FileWhereInput>(["name"], variants),
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -419,6 +424,7 @@ export async function searchWorkspace(
       const rows = await db.folder.findMany({
         where: {
           workspaceId,
+          deletedAt: null,
           OR: anyFieldContains<Prisma.FolderWhereInput>(["name"], variants),
         },
         orderBy: [{ name: "asc" }, { id: "asc" }],
@@ -448,6 +454,7 @@ export async function searchWorkspace(
       const rows = await db.event.findMany({
         where: {
           workspaceId,
+          deletedAt: null,
           OR: anyFieldContains<Prisma.EventWhereInput>(
             ["title", "description", "location"],
             variants,

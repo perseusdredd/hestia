@@ -42,7 +42,7 @@ export async function getOverviewCounts(
   const opts = parseInput(optsSchema, input);
   const today = opts.today ?? todayDateOnly();
   const week = istanbulWeek(today);
-  const open = { workspaceId: ctx.workspaceId, status: "OPEN" as const };
+  const open = { workspaceId: ctx.workspaceId, status: "OPEN" as const, deletedAt: null };
 
   const [openTodos, overdueTodos, eventsThisWeek, unreadNotifications] = await Promise.all([
     db.todoItem.count({ where: open }),
@@ -50,6 +50,7 @@ export async function getOverviewCounts(
     db.event.count({
       where: {
         workspaceId: ctx.workspaceId,
+        deletedAt: null,
         startsAt: { lte: istanbulDayEnd(week.last) },
         endsAt: { gte: istanbulDayStart(week.first) },
       },

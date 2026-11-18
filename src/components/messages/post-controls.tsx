@@ -94,7 +94,7 @@ export function PostControls({
                 action={deletePostAction.bind(null, slug)}
                 fields={{ id: post.id }}
                 title="Gönderi silinsin mi?"
-                description="Gönderi ve tüm yorumları kalıcı olarak silinir. Bu işlem geri alınamaz."
+                description="Gönderi ve yorumları çöp kutusuna taşınır; 30 gün içinde geri yüklenebilir."
                 confirmLabel="Sil"
                 triggerVariant="outline"
                 trigger={

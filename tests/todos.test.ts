@@ -190,14 +190,14 @@ describe("permissions", () => {
 
     await deleteTodoItem(adminA, item.id);
     await deleteTodoList(adminA, list.id);
-    expect(await db.todoList.count({ where: { id: list.id } })).toBe(0);
+    expect(await db.todoList.count({ where: { id: list.id, deletedAt: null } })).toBe(0);
   });
 
   it("deleting a list removes its items", async () => {
     const list = await createTodoList(memberA, { name: "Silinecek" });
     await createTodoItem(memberA, list.id, { title: "a" });
     await deleteTodoList(memberA, list.id);
-    expect(await db.todoItem.count({ where: { listId: list.id } })).toBe(0);
+    expect(await db.todoItem.count({ where: { listId: list.id, deletedAt: null } })).toBe(0);
   });
 });
 

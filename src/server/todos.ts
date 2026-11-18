@@ -150,18 +150,22 @@ export async function listTodoLists(
   const order = [{ position: "asc" as const }, { createdAt: "asc" as const }, { id: "asc" as const }];
   const include = { assignee: { select: userSelect } } as const;
   const [lists, openItems, doneIds, counts] = await Promise.all([
-    db.todoList.findMany({ where: { workspaceId: ctx.workspaceId }, orderBy: order }),
-    db.todoItem.findMany({ where: { workspaceId: ctx.workspaceId, status: "OPEN" }, orderBy: order, include }),
+    db.todoList.findMany({ where: { workspaceId: ctx.workspaceId, deletedAt: null }, orderBy: order }),
+    db.todoItem.findMany({
+      where: { workspaceId: ctx.workspaceId, status: "OPEN", deletedAt: null },
+      orderBy: order,
+      include,
+    }),
     db.$queryRaw<{ id: string }[]>`
       SELECT id FROM (
         SELECT id, ROW_NUMBER() OVER (PARTITION BY "listId" ORDER BY position, "createdAt", id) AS rn
         FROM "TodoItem"
-        WHERE "workspaceId" = ${ctx.workspaceId} AND status = 'DONE'
+        WHERE "workspaceId" = ${ctx.workspaceId} AND status = 'DONE' AND "deletedAt" IS NULL
       ) ranked
       WHERE rn <= ${DONE_ITEMS_PER_LIST}`,
     db.todoItem.groupBy({
       by: ["listId", "status"],
-      where: { workspaceId: ctx.workspaceId },
+      where: { workspaceId: ctx.workspaceId, deletedAt: null },
       _count: { _all: true },
     }),
   ]);
@@ -220,7 +224,7 @@ export async function listMyOpenTodos(
 ): Promise<{ items: MyOpenTodo[]; total: number }> {
   if (!isDateOnly(opts.today)) throw new ServiceError("VALIDATION", "Geçersiz tarih.");
   const take = Math.min(Math.max(opts.take ?? 8, 1), 50);
-  const where = { workspaceId: ctx.workspaceId, assigneeId: ctx.userId, status: "OPEN" as const };
+  const where = { workspaceId: ctx.workspaceId, assigneeId: ctx.userId, status: "OPEN" as const, deletedAt: null };
   const [rows, total] = await Promise.all([
     db.todoItem.findMany({
       where,
@@ -275,7 +279,7 @@ export async function createTodoList(ctx: TenantContext, input: unknown) {
 }
 
 async function getList(ctx: TenantContext, id: string) {
-  const list = await db.todoList.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const list = await db.todoList.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
   if (!list) throw notFound("Liste bulunamadı.");
   return list;
 }
@@ -285,7 +289,7 @@ export async function updateTodoList(ctx: TenantContext, id: string, input: unkn
   const list = await getList(ctx, id);
   if (!canModify(ctx, list.createdById)) throw forbidden();
   const res = await db.todoList.updateMany({
-    where: { id, workspaceId: ctx.workspaceId },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
     data: {
       ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.description !== undefined ? { description: data.description } : {}),
@@ -294,13 +298,25 @@ export async function updateTodoList(ctx: TenantContext, id: string, input: unkn
   if (res.count === 0) throw notFound("Liste bulunamadı.");
 }
 
+/**
+ * Moves the list and its items to the trash (soft delete). Items share the
+ * list's deletedAt, so restoring the list brings back exactly those items.
+ */
 export async function deleteTodoList(ctx: TenantContext, id: string) {
   const list = await getList(ctx, id);
   if (!canModify(ctx, list.createdById)) throw forbidden();
   await db.$transaction(async (tx) => {
     // Before the delete: the list's items and their comments are found through their foreign keys.
     await forgetActivity(ctx, [{ type: "todoList", id: list.id }], tx);
-    await tx.todoList.deleteMany({ where: { id: list.id, workspaceId: ctx.workspaceId } });
+    const stamp = { deletedAt: new Date(), deletedById: ctx.userId };
+    await tx.todoItem.updateMany({
+      where: { listId: list.id, workspaceId: ctx.workspaceId, deletedAt: null },
+      data: stamp,
+    });
+    await tx.todoList.updateMany({
+      where: { id: list.id, workspaceId: ctx.workspaceId, deletedAt: null },
+      data: { ...stamp, updatedAt: list.updatedAt },
+    });
   });
 }
 
@@ -348,7 +364,7 @@ const itemIdSchema = z.string().min(1).max(64);
 export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
   const id = parseInput(itemIdSchema, itemId);
   const item = await db.todoItem.findFirst({
-    where: { id, workspaceId: ctx.workspaceId, list: { workspaceId: ctx.workspaceId } },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, list: { workspaceId: ctx.workspaceId, deletedAt: null } },
     select: {
       id: true,
       title: true,
@@ -373,7 +389,9 @@ export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
 }
 
 async function getItem(ctx: TenantContext, id: string) {
-  const item = await db.todoItem.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const item = await db.todoItem.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, list: { deletedAt: null } },
+  });
   if (!item) throw notFound("Görev bulunamadı.");
   return item;
 }
@@ -384,7 +402,7 @@ export async function updateTodoItem(ctx: TenantContext, id: string, input: unkn
   if (!canModify(ctx, item.createdById)) throw forbidden();
   await requireAssignee(ctx, data.assigneeId);
   const res = await db.todoItem.updateMany({
-    where: { id, workspaceId: ctx.workspaceId },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
     data: {
       ...(data.title !== undefined ? { title: data.title } : {}),
       ...(data.notes !== undefined ? { notes: data.notes } : {}),
@@ -408,19 +426,23 @@ export async function updateTodoItem(ctx: TenantContext, id: string, input: unkn
 /** Any member may mark an item done / open. */
 export async function setTodoItemDone(ctx: TenantContext, id: string, done: boolean) {
   const res = await db.todoItem.updateMany({
-    where: { id, workspaceId: ctx.workspaceId },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, list: { deletedAt: null } },
     data: done ? { status: "DONE", completedAt: new Date() } : { status: "OPEN", completedAt: null },
   });
   if (res.count === 0) throw notFound("Görev bulunamadı.");
   await recordTodoToggled(ctx, id, done);
 }
 
+/** Moves the item to the trash (soft delete). */
 export async function deleteTodoItem(ctx: TenantContext, id: string) {
   const item = await getItem(ctx, id);
   if (!canModify(ctx, item.createdById)) throw forbidden();
   await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "todoItem", id: item.id }], tx);
-    await tx.todoItem.deleteMany({ where: { id: item.id, workspaceId: ctx.workspaceId } });
+    await tx.todoItem.updateMany({
+      where: { id: item.id, workspaceId: ctx.workspaceId, deletedAt: null },
+      data: { deletedAt: new Date(), deletedById: ctx.userId, updatedAt: item.updatedAt },
+    });
   });
 }
 
@@ -502,14 +524,14 @@ export async function moveTodoItem(ctx: TenantContext, id: string, input: unknow
     const locked = await lockLists(tx, ctx, lockIds);
     if (locked !== new Set(lockIds).size) throw notFound("Liste bulunamadı.");
     // The item may have been moved or deleted while we waited for the lock.
-    const fresh = await tx.todoItem.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+    const fresh = await tx.todoItem.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
     if (!fresh) throw notFound("Görev bulunamadı.");
     if (fresh.listId !== item.listId) {
       throw conflict("Görev başka bir yerde taşındı. Sayfayı yenileyip tekrar deneyin.");
     }
 
     const source = await tx.todoItem.findMany({
-      where: { listId: item.listId, workspaceId: ctx.workspaceId },
+      where: { listId: item.listId, workspaceId: ctx.workspaceId, deletedAt: null },
       orderBy: [...itemOrder],
       select: { id: true, position: true, listId: true, status: true },
     });
@@ -522,7 +544,7 @@ export async function moveTodoItem(ctx: TenantContext, id: string, input: unknow
     }
 
     const target = await tx.todoItem.findMany({
-      where: { listId: targetListId!, workspaceId: ctx.workspaceId },
+      where: { listId: targetListId!, workspaceId: ctx.workspaceId, deletedAt: null },
       orderBy: [...itemOrder],
       select: { id: true, position: true, listId: true },
     });
@@ -549,7 +571,7 @@ export async function moveTodoList(ctx: TenantContext, id: string, direction: un
     await lockListPositions(tx, ctx.workspaceId);
     await tx.$queryRaw`SELECT id FROM "TodoList" WHERE "workspaceId" = ${ctx.workspaceId} ORDER BY id FOR UPDATE`;
     const rows = await tx.todoList.findMany({
-      where: { workspaceId: ctx.workspaceId },
+      where: { workspaceId: ctx.workspaceId, deletedAt: null },
       orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
       select: { id: true, position: true },
     });
@@ -569,7 +591,7 @@ export async function moveTodoList(ctx: TenantContext, id: string, direction: un
 /** id + name of every list in the workspace (move targets), in display order. */
 export async function listTodoListOptions(ctx: TenantContext): Promise<{ id: string; name: string }[]> {
   return db.todoList.findMany({
-    where: { workspaceId: ctx.workspaceId },
+    where: { workspaceId: ctx.workspaceId, deletedAt: null },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     select: { id: true, name: true },
   });

@@ -118,7 +118,7 @@ async function lockTree(tx: Tx, workspaceId: string) {
 }
 
 async function findFolder(client: Tx | typeof db, ctx: TenantContext, id: string) {
-  const folder = await client.folder.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const folder = await client.folder.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
   if (!folder) throw notFound("Klasör bulunamadı.");
   return folder;
 }
@@ -150,7 +150,7 @@ async function descendantFolders(client: Tx | typeof db, ctx: TenantContext, roo
   while (frontier.length && depth <= MAX_FOLDER_DEPTH + 5) {
     depth += 1;
     const children = await client.folder.findMany({
-      where: { workspaceId: ctx.workspaceId, parentId: { in: frontier } },
+      where: { workspaceId: ctx.workspaceId, parentId: { in: frontier }, deletedAt: null },
       select: { id: true, parentId: true, createdById: true },
     });
     out.push(...children.map((c) => ({ ...c, depth })));
@@ -169,6 +169,7 @@ async function assertUniqueFolderName(
   const clash = await tx.folder.findFirst({
     where: {
       workspaceId: ctx.workspaceId,
+      deletedAt: null,
       parentId,
       name: { equals: name, mode: "insensitive" },
       ...(exceptId ? { id: { not: exceptId } } : {}),
@@ -182,7 +183,7 @@ async function assertUniqueFolderName(
   }
 }
 
-async function deleteObjects(storage: StorageDriver, keys: string[]) {
+export async function deleteObjects(storage: StorageDriver, keys: string[]) {
   const results = await Promise.allSettled(keys.map((k) => storage.delete(k)));
   results.forEach((r, i) => {
     if (r.status === "rejected") {
@@ -217,18 +218,24 @@ export async function listFolderContents(ctx: TenantContext, folderId: string | 
   const id = parseInput(optionalFolderId, folderId);
   const folder = id ? await findFolder(db, ctx, id) : null;
   const breadcrumbs = id ? (await ancestorChain(db, ctx, id)).map(({ id, name }) => ({ id, name })) : [];
-  const where = { workspaceId: ctx.workspaceId, ...(id ? { folderId: id } : { folderId: null }) };
+  const where = { workspaceId: ctx.workspaceId, deletedAt: null, ...(id ? { folderId: id } : { folderId: null }) };
   // Chat photos are not part of the Files browser (documents have no such flag).
   const fileWhere = { ...where, fromChat: false };
 
   const [folderRows, files, documents] = await Promise.all([
     db.folder.findMany({
-      where: { workspaceId: ctx.workspaceId, parentId: id },
+      where: { workspaceId: ctx.workspaceId, parentId: id, deletedAt: null },
       orderBy: [{ name: "asc" }, { id: "asc" }],
       take: FOLDER_ITEMS_MAX + 1,
       include: {
         createdBy: userSelect,
-        _count: { select: { children: true, files: true, documents: true } },
+        _count: {
+          select: {
+            children: { where: { deletedAt: null } },
+            files: { where: { deletedAt: null } },
+            documents: { where: { deletedAt: null } },
+          },
+        },
       },
     }),
     db.file.findMany({
@@ -301,7 +308,7 @@ export async function listRecentItems(ctx: TenantContext, opts: { take?: number 
   const take = Math.min(Math.max(opts.take ?? 6, 1), 50);
   const [files, documents] = await Promise.all([
     db.file.findMany({
-      where: { workspaceId: ctx.workspaceId, fromChat: false },
+      where: { workspaceId: ctx.workspaceId, fromChat: false, deletedAt: null },
       orderBy: { createdAt: "desc" },
       take,
       select: {
@@ -315,7 +322,7 @@ export async function listRecentItems(ctx: TenantContext, opts: { take?: number 
       },
     }),
     db.document.findMany({
-      where: { workspaceId: ctx.workspaceId },
+      where: { workspaceId: ctx.workspaceId, deletedAt: null },
       orderBy: { updatedAt: "desc" },
       take,
       select: { id: true, title: true, folderId: true, updatedAt: true, author: userSelect },
@@ -347,7 +354,7 @@ export async function listRecentItems(ctx: TenantContext, opts: { take?: number 
 /** Every folder in the workspace (for move pickers). */
 export async function listFolderTree(ctx: TenantContext) {
   return db.folder.findMany({
-    where: { workspaceId: ctx.workspaceId },
+    where: { workspaceId: ctx.workspaceId, deletedAt: null },
     select: { id: true, name: true, parentId: true },
     orderBy: { name: "asc" },
   });
@@ -432,27 +439,29 @@ export async function moveFolder(ctx: TenantContext, input: unknown) {
 }
 
 /**
- * Delete a folder, its subfolders and everything inside them. File/Document
- * rows use SetNull in the schema, so they are deleted here explicitly; storage
- * objects are removed after the DB transaction commits.
+ * Move a folder, its subfolders and everything inside them to the trash (soft
+ * delete). Everything gets the same deletedAt, so restoring the folder brings
+ * back exactly that set. Storage objects stay until the trash is purged.
  * Members may delete only folders whose whole subtree they own; ADMIN+ any.
  */
 export async function deleteFolder(
   ctx: TenantContext,
   folderId: string,
-  storage: StorageDriver = getStorage(),
+  // Kept so callers can still pass a driver: objects are only removed when the trash is purged.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _storage?: StorageDriver,
 ) {
   const id = parseInput(idSchema, folderId);
-  const result = await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     await lockTree(tx, ctx.workspaceId);
     const folder = await findFolder(tx, ctx, id);
     if (!canModify(ctx, folder.createdById)) throw forbidden();
 
     const descendants = await descendantFolders(tx, ctx, folder.id);
     const folderIds = [folder.id, ...descendants.map((d) => d.id)];
-    const scope = { workspaceId: ctx.workspaceId, folderId: { in: folderIds } };
+    const scope = { workspaceId: ctx.workspaceId, deletedAt: null, folderId: { in: folderIds } };
     const [files, documents] = await Promise.all([
-      tx.file.findMany({ where: scope, select: { id: true, storageKey: true, uploadedById: true } }),
+      tx.file.findMany({ where: scope, select: { id: true, uploadedById: true } }),
       tx.document.findMany({ where: scope, select: { id: true, authorId: true } }),
     ]);
 
@@ -469,7 +478,7 @@ export async function deleteFolder(
     }
 
     // Feed rows of the folders, the files and documents in them and the
-    // documents' comments (before the deletes: comments are found by key).
+    // documents' comments (before the update: comments are found by key).
     await forgetActivity(
       ctx,
       [
@@ -479,38 +488,73 @@ export async function deleteFolder(
       ],
       tx,
     );
-    await tx.file.deleteMany({ where: { id: { in: files.map((f) => f.id) }, workspaceId: ctx.workspaceId } });
-    await tx.document.deleteMany({
-      where: { id: { in: documents.map((d) => d.id) }, workspaceId: ctx.workspaceId },
+    const stamp = { deletedAt: new Date(), deletedById: ctx.userId };
+    await tx.file.updateMany({
+      where: { id: { in: files.map((f) => f.id) }, workspaceId: ctx.workspaceId },
+      data: stamp,
     });
-    // Subfolders cascade via the FolderTree relation.
-    await tx.folder.deleteMany({ where: { id: folder.id, workspaceId: ctx.workspaceId } });
+    // Raw: updateMany would bump updatedAt, which is the "last edited" date.
+    if (documents.length) {
+      await tx.$executeRaw`UPDATE "Document" SET "deletedAt" = ${stamp.deletedAt}, "deletedById" = ${stamp.deletedById}
+        WHERE "workspaceId" = ${ctx.workspaceId} AND id = ANY(${documents.map((d) => d.id)}::text[])`;
+    }
+    await tx.folder.updateMany({
+      where: { id: { in: folderIds }, workspaceId: ctx.workspaceId },
+      data: stamp,
+    });
 
     return {
       parentId: folder.parentId,
-      keys: files.map((f) => f.storageKey),
       deletedFolders: folderIds.length,
       deletedFiles: files.length,
       deletedDocuments: documents.length,
     };
   });
+}
 
-  await deleteObjects(
-    storage,
-    result.keys.filter((k) => keyBelongsToWorkspace(k, ctx.workspaceId)),
-  );
-  return {
-    parentId: result.parentId,
-    deletedFolders: result.deletedFolders,
-    deletedFiles: result.deletedFiles,
-    deletedDocuments: result.deletedDocuments,
-  };
+/**
+ * Brings a trashed folder back with everything that was trashed together with
+ * it (same deletedAt: subfolders, files, documents). The parent folder must be
+ * live and the name free there. Returns what was restored.
+ */
+export async function restoreFolderTree(ctx: TenantContext, folderId: string) {
+  const id = parseInput(idSchema, folderId);
+  return db.$transaction(async (tx) => {
+    await lockTree(tx, ctx.workspaceId);
+    const folder = await tx.folder.findFirst({
+      where: { id, workspaceId: ctx.workspaceId, deletedAt: { not: null } },
+    });
+    if (!folder?.deletedAt) throw notFound("Klasör bulunamadı.");
+    if (!canModify(ctx, folder.createdById)) throw forbidden();
+    if (folder.parentId) {
+      const parent = await tx.folder.findFirst({
+        where: { id: folder.parentId, workspaceId: ctx.workspaceId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!parent) {
+        throw new ServiceError("CONFLICT", "Üst klasör silinmiş. Önce üst klasörü geri yükleyin.");
+      }
+    }
+    await assertUniqueFolderName(tx, ctx, folder.parentId, folder.name, folder.id);
+
+    const together = { workspaceId: ctx.workspaceId, deletedAt: folder.deletedAt, deletedById: folder.deletedById };
+    const cleared = { deletedAt: null, deletedById: null };
+    const [files, documents, folders] = await Promise.all([
+      tx.file.updateMany({ where: together, data: cleared }),
+      // Raw: updateMany would bump updatedAt, which is the "last edited" date.
+      tx.$executeRaw`UPDATE "Document" SET "deletedAt" = NULL, "deletedById" = NULL
+        WHERE "workspaceId" = ${together.workspaceId} AND "deletedAt" = ${folder.deletedAt}
+          AND "deletedById" IS NOT DISTINCT FROM ${folder.deletedById}`,
+      tx.folder.updateMany({ where: together, data: cleared }),
+    ]);
+    return { folder, restoredFolders: folders.count, restoredFiles: files.count, restoredDocuments: Number(documents) };
+  });
 }
 
 // -------------------------------------------------------------- files ----
 
 async function findFile(client: Tx | typeof db, ctx: TenantContext, id: string) {
-  const file = await client.file.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const file = await client.file.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
   if (!file) throw notFound("Dosya bulunamadı.");
   return file;
 }
@@ -637,6 +681,8 @@ export async function completeUpload(
   const existing = await db.file.findUnique({ where: { storageKey: p.k } });
   if (existing) {
     if (existing.workspaceId !== ctx.workspaceId) throw notFound("Dosya bulunamadı.");
+    // A trashed file's key stays taken: a replayed token must not resurrect it.
+    if (existing.deletedAt) throw new ServiceError("CONFLICT", KEY_USED_MESSAGE);
     return existing;
   }
   const used = await db.uploadKey.findUnique({ where: { storageKey: p.k }, select: { storageKey: true } });
@@ -656,7 +702,7 @@ export async function completeUpload(
       await lockTree(tx, ctx.workspaceId);
       if (p.f) {
         const folder = await tx.folder.findFirst({
-          where: { id: p.f, workspaceId: ctx.workspaceId },
+          where: { id: p.f, workspaceId: ctx.workspaceId, deletedAt: null },
           select: { id: true },
         });
         if (!folder) throw notFound("Hedef klasör artık mevcut değil.");
@@ -690,7 +736,7 @@ export async function completeUpload(
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       const row = await db.file.findUnique({ where: { storageKey: p.k } });
-      if (row && row.workspaceId === ctx.workspaceId) return row;
+      if (row && row.workspaceId === ctx.workspaceId && !row.deletedAt) return row;
       if (!row) {
         // Key consumed by a completion whose File is already gone again.
         const used = await db.uploadKey.findUnique({ where: { storageKey: p.k }, select: { storageKey: true } });
@@ -787,20 +833,27 @@ export async function moveFile(ctx: TenantContext, input: unknown) {
   });
 }
 
+/** Moves the file to the trash (soft delete); the stored object stays until the trash is purged. */
 export async function deleteFile(
   ctx: TenantContext,
   fileId: string,
-  storage: StorageDriver = getStorage(),
+  // Kept so callers can still pass a driver: objects are only removed when the trash is purged.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _storage?: StorageDriver,
 ) {
   const id = parseInput(idSchema, fileId);
   const file = await findFile(db, ctx, id);
   if (!canModify(ctx, file.uploadedById)) throw forbidden();
   const count = await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "file", id: file.id }], tx);
-    return (await tx.file.deleteMany({ where: { id: file.id, workspaceId: ctx.workspaceId } })).count;
+    return (
+      await tx.file.updateMany({
+        where: { id: file.id, workspaceId: ctx.workspaceId, deletedAt: null },
+        data: { deletedAt: new Date(), deletedById: ctx.userId },
+      })
+    ).count;
   });
   if (count === 0) throw notFound("Dosya bulunamadı.");
-  if (keyBelongsToWorkspace(file.storageKey, ctx.workspaceId)) await deleteObjects(storage, [file.storageKey]);
   return { folderId: file.folderId };
 }
 
@@ -812,8 +865,8 @@ export async function deleteFile(
 export async function authorizeFileAccess(userId: string, fileId: string): Promise<TenantContext | null> {
   const id = idSchema.safeParse(fileId);
   if (!id.success || !userId) return null;
-  const file = await db.file.findUnique({ where: { id: id.data }, select: { workspaceId: true } });
-  if (!file) return null;
+  const file = await db.file.findUnique({ where: { id: id.data }, select: { workspaceId: true, deletedAt: true } });
+  if (!file || file.deletedAt) return null;
   const membership = await db.membership.findUnique({
     where: { userId_workspaceId: { userId, workspaceId: file.workspaceId } },
     select: { role: true },
@@ -941,7 +994,7 @@ export async function getFilePreview(
 ) {
   const id = parseInput(idSchema, fileId);
   const file = await db.file.findFirst({
-    where: { id, workspaceId: ctx.workspaceId },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
     include: { uploadedBy: userSelect },
   });
   if (!file) throw notFound("Dosya bulunamadı.");
@@ -966,7 +1019,7 @@ export async function getFilePreview(
 // ---------------------------------------------------------- documents ----
 
 async function findDocument(client: Tx | typeof db, ctx: TenantContext, id: string) {
-  const doc = await client.document.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  const doc = await client.document.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
   if (!doc) throw notFound("Doküman bulunamadı.");
   return doc;
 }
@@ -975,7 +1028,7 @@ async function findDocument(client: Tx | typeof db, ctx: TenantContext, id: stri
 export async function getDocument(ctx: TenantContext, documentId: string) {
   const id = parseInput(idSchema, documentId);
   const doc = await db.document.findFirst({
-    where: { id, workspaceId: ctx.workspaceId },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
     include: { author: userSelect },
   });
   if (!doc) throw notFound("Doküman bulunamadı.");
@@ -1037,13 +1090,17 @@ export async function moveDocument(ctx: TenantContext, input: unknown) {
   });
 }
 
+/** Moves the document to the trash (soft delete). */
 export async function deleteDocument(ctx: TenantContext, documentId: string) {
   const id = parseInput(idSchema, documentId);
   const doc = await findDocument(db, ctx, id);
   if (!canModify(ctx, doc.authorId)) throw forbidden();
   await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "document", id: doc.id }], tx);
-    const { count } = await tx.document.deleteMany({ where: { id: doc.id, workspaceId: ctx.workspaceId } });
+    const { count } = await tx.document.updateMany({
+      where: { id: doc.id, workspaceId: ctx.workspaceId, deletedAt: null },
+      data: { deletedAt: new Date(), deletedById: ctx.userId, updatedAt: doc.updatedAt },
+    });
     if (count === 0) throw notFound("Doküman bulunamadı.");
   });
   return { folderId: doc.folderId };
