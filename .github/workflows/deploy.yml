@@ -51,9 +51,13 @@ jobs:
               "$DEPLOY_USER@$DEPLOY_HOST" deploy
 
       - name: Canlı kontrol
+        env:
+          # Repo ayarı: Settings > Secrets and variables > Actions > Variables > HEALTH_URL
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
         run: |
+          if [ -z "$HEALTH_URL" ]; then echo "HEALTH_URL tanımlı değil, kontrol atlandı"; exit 0; fi
           for i in $(seq 1 30); do
-            if curl -fsS https://saas.numanbayram.com/api/health; then exit 0; fi
+            if curl -fsS "$HEALTH_URL"; then exit 0; fi
             sleep 5
           done
           echo "Canlı sağlık kontrolü başarısız" >&2
