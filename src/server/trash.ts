@@ -168,6 +168,8 @@ type Found = {
   deletedAt: Date;
   path: string;
   subject: ActivitySubject;
+  /** True only for an unpublished post (draft): restoring it must not announce its title. */
+  isDraft: boolean;
 };
 
 const gone = "Öğe çöp kutusunda bulunamadı.";
@@ -178,39 +180,41 @@ async function findTrashed(ctx: TenantContext, kind: TrashKind, id: string): Pro
   const where = { id, workspaceId: ctx.workspaceId, deletedAt: trashed };
   switch (kind) {
     case "post": {
-      const r = await db.post.findFirst({ where });
+      // A draft is author-only even in the trash: a non-author (incl. ADMIN) must
+      // not find, restore or purge it, nor see its title announced.
+      const r = await db.post.findFirst({ where: { ...where, ...visiblePostWhere(ctx) } });
       if (!r?.deletedAt) break;
-      return { title: r.title, ownerId: r.authorId, deletedAt: r.deletedAt, path: postActivityPath(r.id), subject: { type: "post", id: r.id } };
+      return { title: r.title, ownerId: r.authorId, deletedAt: r.deletedAt, path: postActivityPath(r.id), subject: { type: "post", id: r.id }, isDraft: r.publishedAt === null };
     }
     case "todoItem": {
       const r = await db.todoItem.findFirst({ where });
       if (!r?.deletedAt) break;
-      return { title: r.title, ownerId: r.createdById, deletedAt: r.deletedAt, path: `todos/${r.id}`, subject: { type: "todoItem", id: r.id } };
+      return { title: r.title, ownerId: r.createdById, deletedAt: r.deletedAt, path: `todos/${r.id}`, subject: { type: "todoItem", id: r.id }, isDraft: false };
     }
     case "todoList": {
       const r = await db.todoList.findFirst({ where });
       if (!r?.deletedAt) break;
-      return { title: r.name, ownerId: r.createdById, deletedAt: r.deletedAt, path: "todos", subject: { type: "todoList", id: r.id } };
+      return { title: r.name, ownerId: r.createdById, deletedAt: r.deletedAt, path: "todos", subject: { type: "todoList", id: r.id }, isDraft: false };
     }
     case "event": {
       const r = await db.event.findFirst({ where });
       if (!r?.deletedAt) break;
-      return { title: r.title, ownerId: r.createdById, deletedAt: r.deletedAt, path: eventActivityPath(r), subject: { type: "event", id: r.id } };
+      return { title: r.title, ownerId: r.createdById, deletedAt: r.deletedAt, path: eventActivityPath(r), subject: { type: "event", id: r.id }, isDraft: false };
     }
     case "file": {
       const r = await db.file.findFirst({ where });
       if (!r?.deletedAt) break;
-      return { title: r.name, ownerId: r.uploadedById, deletedAt: r.deletedAt, path: folderActivityPath(r.folderId), subject: { type: "file", id: r.id } };
+      return { title: r.name, ownerId: r.uploadedById, deletedAt: r.deletedAt, path: folderActivityPath(r.folderId), subject: { type: "file", id: r.id }, isDraft: false };
     }
     case "document": {
       const r = await db.document.findFirst({ where });
       if (!r?.deletedAt) break;
-      return { title: r.title, ownerId: r.authorId, deletedAt: r.deletedAt, path: documentActivityPath(r.id), subject: { type: "document", id: r.id } };
+      return { title: r.title, ownerId: r.authorId, deletedAt: r.deletedAt, path: documentActivityPath(r.id), subject: { type: "document", id: r.id }, isDraft: false };
     }
     case "folder": {
       const r = await db.folder.findFirst({ where });
       if (!r?.deletedAt) break;
-      return { title: r.name, ownerId: r.createdById, deletedAt: r.deletedAt, path: folderActivityPath(r.id), subject: { type: "folder", id: r.id } };
+      return { title: r.name, ownerId: r.createdById, deletedAt: r.deletedAt, path: folderActivityPath(r.id), subject: { type: "folder", id: r.id }, isDraft: false };
     }
   }
   throw notFound(gone);
@@ -282,7 +286,10 @@ export async function restoreTrashItem(ctx: TenantContext, input: unknown): Prom
   }
   if (!restored || restored.count === 0) throw notFound(gone);
 
-  await recordActivity(ctx, { type: "ITEM_RESTORED", title: found.title, path: found.path, subject: found.subject });
+  // Restoring an unpublished draft must not broadcast its title to the workspace.
+  if (!found.isDraft) {
+    await recordActivity(ctx, { type: "ITEM_RESTORED", title: found.title, path: found.path, subject: found.subject });
+  }
   return { title: found.title };
 }
 

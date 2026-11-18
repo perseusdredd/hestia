@@ -113,6 +113,8 @@ type LoadedSubject = CommentSubject & {
   title: string;
   /** People who follow the subject: post/document author, to-do creator + assignee, event creator. */
   ownerIds: string[];
+  /** True only for an unpublished post (draft): no activity or notifications may leak its title/body. */
+  isDraft: boolean;
 };
 
 const NOT_FOUND_MESSAGES: Record<CommentSubjectType, string> = {
@@ -139,9 +141,9 @@ async function loadSubject(ctx: TenantContext, input: unknown): Promise<LoadedSu
     case "post": {
       const row = await db.post.findFirst({
         where: { ...where, ...visiblePostWhere(ctx) },
-        select: { id: true, title: true, authorId: true },
+        select: { id: true, title: true, authorId: true, publishedAt: true },
       });
-      if (row) found = { ...subject, title: row.title, ownerIds: [row.authorId] };
+      if (row) found = { ...subject, title: row.title, ownerIds: [row.authorId], isDraft: row.publishedAt === null };
       break;
     }
     case "todo": {
@@ -151,18 +153,18 @@ async function loadSubject(ctx: TenantContext, input: unknown): Promise<LoadedSu
       });
       if (row) {
         const ids = [row.createdById, ...(row.assigneeId ? [row.assigneeId] : [])];
-        found = { ...subject, title: row.title, ownerIds: ids };
+        found = { ...subject, title: row.title, ownerIds: ids, isDraft: false };
       }
       break;
     }
     case "document": {
       const row = await db.document.findFirst({ where, select: { id: true, title: true, authorId: true } });
-      if (row) found = { ...subject, title: row.title, ownerIds: [row.authorId] };
+      if (row) found = { ...subject, title: row.title, ownerIds: [row.authorId], isDraft: false };
       break;
     }
     case "event": {
       const row = await db.event.findFirst({ where, select: { id: true, title: true, createdById: true } });
-      if (row) found = { ...subject, title: row.title, ownerIds: [row.createdById] };
+      if (row) found = { ...subject, title: row.title, ownerIds: [row.createdById], isDraft: false };
       break;
     }
   }
@@ -418,14 +420,18 @@ export async function addComment(ctx: TenantContext, subject: CommentSubject, in
   const comment = await db.comment.create({
     data: { body: data.body, workspaceId: ctx.workspaceId, authorId: ctx.userId, ...subjectKey(s) },
   });
-  // After the main write; neither throws.
-  await notifyNewComment(ctx, s, comment);
-  await recordActivity(ctx, {
-    type: "COMMENT_CREATED",
-    title: s.title,
-    path: commentSubjectPath(s),
-    subject: { type: "comment", id: comment.id },
-  });
+  // A draft post is author-only; commenting on it must not broadcast its title
+  // or body to the workspace (activity feed) or to anyone via notifications.
+  if (!s.isDraft) {
+    // After the main write; neither throws.
+    await notifyNewComment(ctx, s, comment);
+    await recordActivity(ctx, {
+      type: "COMMENT_CREATED",
+      title: s.title,
+      path: commentSubjectPath(s),
+      subject: { type: "comment", id: comment.id },
+    });
+  }
   return comment;
 }
 
@@ -458,12 +464,15 @@ export async function updateComment(
   if (res.count === 0) throw notFound("Yorum bulunamadı.");
   const before = new Set(parseMentionIds(comment.body, MAX_MENTIONS));
   const added = (await resolveMentionedMembers(ctx, data.body)).filter((id) => !before.has(id));
-  await notifyMentions(ctx, added, {
-    title: subject.title,
-    path: commentSubjectPath(subject),
-    body: data.body,
-    kind: { comment: subject.type },
-  });
+  // No mention notifications for a comment on an unpublished draft (author-only).
+  if (!subject.isDraft) {
+    await notifyMentions(ctx, added, {
+      title: subject.title,
+      path: commentSubjectPath(subject),
+      body: data.body,
+      kind: { comment: subject.type },
+    });
+  }
   return { subject: { type: subject.type, id: subject.id } };
 }
 

@@ -10,8 +10,9 @@ import {
   ensureDefaultCategories,
   listCategories,
 } from "@/server/message-categories";
-import { createComment, createPost, getPost, listPosts, publishPost, setPostPinned, updatePost } from "@/server/messages";
+import { createComment, createPost, deletePost, getPost, listPosts, publishPost, setPostPinned, updatePost } from "@/server/messages";
 import { searchWorkspace } from "@/server/search";
+import { purgeTrashItem, restoreTrashItem } from "@/server/trash";
 import { createWorkspace } from "@/server/workspaces";
 
 import { cleanup, createMember, createTestUser, createTestWorkspace } from "./helpers";
@@ -168,5 +169,35 @@ describe("message drafts", () => {
     expect(live.publishedAt).toBeInstanceOf(Date);
     expect(await countPostNotifications(author, live.id)).toBe(2);
     expect(await code(publishPost(author, live.id))).toBe("CONFLICT");
+  });
+
+  it("commenting on your own draft leaks nothing to the workspace", async () => {
+    const draft = await createPost(author, { title: "Gizli taslak", body: "x", draft: true });
+    const c = await createComment(author, draft.id, { body: `@${admin.userId} bak` });
+
+    // No activity row and no notification (neither POST_COMMENT nor MENTION) escapes.
+    expect(await db.activity.count({ where: { subjectType: "comment", subjectId: c.id } })).toBe(0);
+    expect(await countPostNotifications(author, draft.id)).toBe(0);
+    expect(await db.notification.count({ where: { path: `messages/${draft.id}`, userId: admin.userId } })).toBe(0);
+
+    // After publishing, a new comment behaves normally again.
+    await publishPost(author, draft.id);
+    const c2 = await createComment(reader, draft.id, { body: "artık görünür" });
+    expect(await db.activity.count({ where: { subjectType: "comment", subjectId: c2.id, type: "COMMENT_CREATED" } })).toBe(1);
+  });
+
+  it("restoring a trashed draft announces nothing and stays author-only", async () => {
+    const draft = await createPost(author, { title: "Çöpe giden taslak", body: "x", draft: true });
+    await deletePost(author, draft.id);
+
+    // A non-author (even ADMIN) can neither restore nor purge another user's trashed draft.
+    expect(await code(restoreTrashItem(admin, { kind: "post", id: draft.id }))).toBe("NOT_FOUND");
+    expect(await code(restoreTrashItem(reader, { kind: "post", id: draft.id }))).toBe("NOT_FOUND");
+    expect(await code(purgeTrashItem(admin, { kind: "post", id: draft.id }))).toBe("NOT_FOUND");
+
+    // The author restores it; no ITEM_RESTORED row carries the draft title.
+    await restoreTrashItem(author, { kind: "post", id: draft.id });
+    expect(await db.activity.count({ where: { subjectType: "post", subjectId: draft.id, type: "ITEM_RESTORED" } })).toBe(0);
+    expect((await getPost(author, draft.id)).title).toBe("Çöpe giden taslak");
   });
 });
