@@ -15,6 +15,7 @@ import { conflict, forbidden, notFound, parseInput, ServiceError } from "@/serve
 import { recordMemberJoined, recordMembershipRemoved, recordRoleChanged } from "@/server/activity";
 import { queueMail, type MailStatus } from "@/server/mail";
 import { ensureClaudeMember } from "@/server/claude-bot";
+import { ensureDefaultColumns } from "@/server/cards";
 import { ensureDefaultCategories } from "@/server/message-categories";
 import { notifyMemberJoined } from "@/server/notifications";
 
@@ -129,6 +130,7 @@ export async function createWorkspace(actor: { userId: string }, input: unknown)
       });
       await ensureClaudeMember(tx, workspace.id);
       await ensureDefaultCategories(tx, workspace.id);
+      await ensureDefaultColumns(tx, workspace.id, actor.userId);
       return workspace;
     });
   } catch (e) {
