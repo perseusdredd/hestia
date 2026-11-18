@@ -37,6 +37,7 @@ export const ACTIVITY_TYPES = [
   "DOCUMENT_UPDATED",
   "FOLDER_CREATED",
   "ITEM_RESTORED",
+  "HILL_UPDATED",
   "MEMBER_JOINED",
   "MEMBER_REMOVED",
   "MEMBER_LEFT",
@@ -47,7 +48,7 @@ export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 /** Filter groups shown on the feed page. */
 export const ACTIVITY_GROUPS = {
   messages: ["POST_CREATED", "COMMENT_CREATED"],
-  todos: ["TODO_LIST_CREATED", "TODO_CREATED", "TODO_COMPLETED", "TODO_REOPENED"],
+  todos: ["TODO_LIST_CREATED", "TODO_CREATED", "TODO_COMPLETED", "TODO_REOPENED", "HILL_UPDATED"],
   calendar: ["EVENT_CREATED", "EVENT_UPDATED"],
   files: ["FILE_UPLOADED", "DOCUMENT_CREATED", "DOCUMENT_UPDATED", "FOLDER_CREATED"],
   trash: ["ITEM_RESTORED"],

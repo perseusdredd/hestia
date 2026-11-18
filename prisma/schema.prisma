@@ -123,6 +123,7 @@ model Workspace {
   subscriptions Subscription[]
   reactions     Reaction[]
   bookmarks     Bookmark[]
+  hillSnapshots HillSnapshot[]
 }
 
 model Membership {
@@ -248,6 +249,9 @@ model TodoList {
   name        String
   description String?  @db.Text
   position    Int      @default(0)
+  // Hill chart: 0-50 uphill (figuring it out), 50-100 downhill (making it happen).
+  hillPosition Int     @default(0)
+  hillNote     String? @db.Text
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   // Soft delete: set while the row is in the trash (purged after 30 days by the cleanup cron).
@@ -257,9 +261,25 @@ model TodoList {
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy User       @relation(fields: [createdById], references: [id], onDelete: Cascade)
   items     TodoItem[]
+  hillSnapshots HillSnapshot[]
 
   @@index([workspaceId, position])
   @@index([workspaceId, deletedAt])
+}
+
+model HillSnapshot {
+  id          String   @id @default(cuid())
+  workspaceId String
+  listId      String
+  position    Int
+  note        String?  @db.Text
+  createdById String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  list      TodoList  @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, listId])
 }
 
 model TodoItem {

@@ -85,6 +85,8 @@ export type TodoListDTO = {
   description: string | null;
   createdById: string;
   canEdit: boolean;
+  hillPosition: number;
+  hillNote: string | null;
   total: number;
   doneCount: number;
   /** Completed items not loaded (beyond DONE_ITEMS_PER_LIST); not counted as filtered out. */
@@ -203,6 +205,8 @@ export async function listTodoLists(
       description: l.description,
       createdById: l.createdById,
       canEdit: canModify(ctx, l.createdById),
+      hillPosition: l.hillPosition,
+      hillNote: l.hillNote,
       total,
       doneCount: done,
       // With the filter on, everything not shown counts as filtered out.

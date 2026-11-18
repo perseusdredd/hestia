@@ -78,6 +78,7 @@ const META: Record<string, Meta> = {
   TODO_CREATED: { icon: ListTodo, before: "bir görev ekledi: " },
   TODO_COMPLETED: { icon: CheckCircle2, before: "bir görevi tamamladı: " },
   TODO_REOPENED: { icon: RotateCcw, before: "bir görevi yeniden açtı: " },
+  HILL_UPDATED: { icon: Activity, before: "bir listenin tepe grafiğini güncelledi: " },
   EVENT_CREATED: { icon: CalendarPlus, before: "bir etkinlik ekledi: " },
   EVENT_UPDATED: { icon: CalendarCheck, before: "bir etkinliği güncelledi: " },
   FILE_UPLOADED: { icon: FileUp, before: "bir dosya yükledi: " },

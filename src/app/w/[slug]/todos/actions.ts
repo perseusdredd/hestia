@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { formString, toActionState, type ActionState } from "@/lib/action-state";
 import { requireWorkspace } from "@/lib/tenant";
+import { getHillHistory, setHillPosition, type HillSnapshotDTO } from "@/server/hill";
 import {
   createTodoItem,
   createTodoList,
@@ -171,5 +172,33 @@ export async function moveListAction(
     return { ok: true };
   } catch (e) {
     return toActionState(e);
+  }
+}
+
+export async function setHillAction(
+  slug: string,
+  listId: string,
+  position: number,
+  note: string,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    await setHillPosition(ctx, listId, position, note);
+    revalidate(slug);
+    return { ok: true, message: "Tepe konumu güncellendi." };
+  } catch (e) {
+    return toActionState(e);
+  }
+}
+
+export async function hillHistoryAction(
+  slug: string,
+  listId: string,
+): Promise<{ ok: true; history: HillSnapshotDTO[] } | { ok: false; error: string }> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    return { ok: true, history: await getHillHistory(ctx, listId) };
+  } catch (e) {
+    return { ok: false, error: toActionState(e).error ?? "Geçmiş yüklenemedi." };
   }
 }

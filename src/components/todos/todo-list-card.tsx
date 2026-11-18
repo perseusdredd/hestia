@@ -22,6 +22,7 @@ import type { ActionState } from "@/lib/action-state";
 import { cn } from "@/lib/utils";
 import type { TodoListDTO, TodoUser } from "@/server/todos";
 
+import { HillChart } from "./hill-chart";
 import { EditListButton } from "./list-dialogs";
 import { TodoItemRow } from "./todo-item-row";
 
@@ -205,6 +206,15 @@ export function TodoListCard({
           </span>
         </div>
       </div>
+
+      <HillChart
+        key={`${list.id}-${list.hillPosition}`}
+        slug={slug}
+        listId={list.id}
+        listName={list.name}
+        position={list.hillPosition}
+        note={list.hillNote}
+      />
 
       {items.length === 0 ? (
         <p className="px-4 py-6 text-center text-sm text-muted-foreground">
