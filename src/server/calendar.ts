@@ -17,6 +17,7 @@ import type { TenantContext } from "@/lib/tenant-context";
 import { eventActivityPath, forgetActivity, recordActivity } from "@/server/activity";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { notifyEventCreated, notifyEventInvited } from "@/server/notifications";
+import { assertAssignableProject, projectIdField } from "@/server/projects";
 import { autoSubscribe } from "@/server/subscriptions";
 
 const optionalText = (max: number, label: string) =>
@@ -45,6 +46,8 @@ const eventInputSchema = z.object({
   recurrenceUntil: z.string().trim().optional(),
   /** Member ids to invite. Omitted = leave the invitee list unchanged on update. */
   inviteeIds: z.array(z.string().min(1).max(64)).max(200).optional(),
+  /** Optional project, honoured on create only; empty / omitted = "Genel". */
+  projectId: projectIdField,
 });
 
 export type EventInput = z.input<typeof eventInputSchema>;
@@ -104,13 +107,15 @@ export function normalizeEventInput(input: unknown) {
     recurrence: v.recurrence,
     recurrenceUntil,
     inviteeIds: v.inviteeIds,
+    projectId: v.projectId,
   };
 }
 
 /** The columns persisted on Event (normalizeEventInput minus the invitee list). */
 function eventColumns(data: ReturnType<typeof normalizeEventInput>) {
-  const { inviteeIds: _inviteeIds, ...columns } = data;
+  const { inviteeIds: _inviteeIds, projectId: _projectId, ...columns } = data;
   void _inviteeIds;
+  void _projectId;
   return columns;
 }
 
@@ -287,8 +292,9 @@ export async function getEvent(ctx: TenantContext, id: string): Promise<EventWit
 
 export async function createEvent(ctx: TenantContext, input: unknown): Promise<Event> {
   const parsed = normalizeEventInput(input);
+  const projectId = await assertAssignableProject(ctx, parsed.projectId);
   const event = await db.event.create({
-    data: { ...eventColumns(parsed), workspaceId: ctx.workspaceId, createdById: ctx.userId },
+    data: { ...eventColumns(parsed), projectId, workspaceId: ctx.workspaceId, createdById: ctx.userId },
   });
   await autoSubscribe(ctx, { type: "event", id: event.id }, [ctx.userId]);
   const invited = parsed.inviteeIds ? await syncInvitees(ctx, event.id, parsed.inviteeIds) : [];

@@ -41,10 +41,14 @@ export async function createFolderAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const values = { name: formString(formData, "name") };
+  const values = { name: formString(formData, "name"), projectId: formString(formData, "projectId") };
   try {
     const { ctx } = await requireWorkspace(slug);
-    await createFolder(ctx, { name: values.name, parentId: formString(formData, "parentId") });
+    await createFolder(ctx, {
+      name: values.name,
+      parentId: formString(formData, "parentId"),
+      projectId: values.projectId,
+    });
     revalidate(slug);
     return { ok: true, message: "Klasör oluşturuldu." };
   } catch (e) {

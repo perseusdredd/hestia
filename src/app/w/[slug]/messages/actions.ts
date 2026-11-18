@@ -33,7 +33,7 @@ export async function createPostAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const values = postValues(formData);
+  const values = { ...postValues(formData), projectId: formString(formData, "projectId") };
   const draft = formString(formData, "intent") === "draft";
   let postId: string;
   try {

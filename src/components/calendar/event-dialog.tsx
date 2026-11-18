@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { createEventAction, deleteEventAction, updateEventAction } from "@/app/w/[slug]/calendar/actions";
 import { ConfirmAction } from "@/components/confirm-action";
 import { FieldError, FormError } from "@/components/form-error";
+import { ProjectSelect, type ProjectOption } from "@/components/project-select";
 import { SubmitButton } from "@/components/submit-button";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -37,11 +38,13 @@ export function EventDialog({
   slug,
   target,
   members,
+  projects = [],
   onClose,
 }: {
   slug: string;
   target: DialogTarget;
   members: CalMember[];
+  projects?: ProjectOption[];
   onClose: () => void;
 }) {
   const event = target?.mode === "edit" ? target.event : null;
@@ -66,6 +69,7 @@ export function EventDialog({
               slug={slug}
               event={event}
               members={members}
+              projects={projects}
               defaultDay={target.mode === "create" ? target.dayKey : null}
               readOnly={readOnly}
               onDone={onClose}
@@ -106,6 +110,7 @@ function EventForm({
   slug,
   event,
   members,
+  projects,
   defaultDay,
   readOnly,
   onDone,
@@ -113,6 +118,7 @@ function EventForm({
   slug: string;
   event: CalEvent | null;
   members: CalMember[];
+  projects: ProjectOption[];
   defaultDay: string | null;
   readOnly: boolean;
   onDone: () => void;
@@ -213,6 +219,15 @@ function EventForm({
           <FieldError errors={fe?.endsAt} />
         </div>
       </div>
+
+      {event ? null : (
+        <ProjectSelect
+          projects={projects}
+          id="ev-project"
+          defaultValue={state.values?.projectId ?? ""}
+          errors={fe?.projectId}
+        />
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-1.5">

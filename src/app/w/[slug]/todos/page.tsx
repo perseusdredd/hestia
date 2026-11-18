@@ -10,6 +10,7 @@ import { TodoListCard } from "@/components/todos/todo-list-card";
 import { buttonVariants } from "@/components/ui/button";
 import { requireWorkspace } from "@/lib/tenant";
 import { countComments } from "@/server/comments";
+import { listProjectOptions } from "@/server/projects";
 import { listTodoListOptions, listTodoLists } from "@/server/todos";
 import { listMemberUsers } from "@/server/workspaces";
 
@@ -27,10 +28,11 @@ export default async function TodosPage({
   const assignedToMe = mine === "1";
   const { ctx } = await requireWorkspace(slug);
 
-  const [lists, listOptions, members] = await Promise.all([
+  const [lists, listOptions, members, projects] = await Promise.all([
     listTodoLists(ctx, { assignedToMe }),
     listTodoListOptions(ctx),
     listMemberUsers(ctx),
+    listProjectOptions(ctx),
   ]);
   // One grouped query for every visible item.
   const commentCounts = await countComments(
@@ -46,7 +48,7 @@ export default async function TodosPage({
       <PageHeader
         title="Yapılacaklar"
         description="Görev listeleri, atamalar ve bitiş tarihleri."
-        actions={<NewListButton slug={slug} />}
+        actions={<NewListButton slug={slug} projects={projects} />}
       />
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Görev filtresi">

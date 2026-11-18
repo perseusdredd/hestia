@@ -18,6 +18,7 @@ import {
 } from "@/server/comments";
 import { notify } from "@/server/notifications";
 import { visiblePostWhere } from "@/server/post-visibility";
+import { assertAssignableProject, projectIdField } from "@/server/projects";
 
 const idSchema = z.string().min(1).max(64);
 
@@ -35,6 +36,8 @@ const postSchema = z.object({
 const createPostSchema = postSchema.extend({
   /** true = save as a draft (visible only to the author, nothing is announced). */
   draft: z.boolean().optional(),
+  /** Optional project; empty / omitted = "Genel". Only chosen at creation. */
+  projectId: projectIdField,
 });
 
 /** The category must belong to the workspace. */
@@ -195,12 +198,14 @@ export async function getPost(ctx: TenantContext, postId: string) {
 }
 
 export async function createPost(ctx: TenantContext, input: unknown) {
-  const { draft, ...data } = parseInput(createPostSchema, input);
+  const { draft, projectId, ...data } = parseInput(createPostSchema, input);
   await assertCategory(ctx, data.categoryId);
+  const assignedProjectId = await assertAssignableProject(ctx, projectId);
   const post = await db.post.create({
     data: {
       ...data,
       categoryId: data.categoryId ?? null,
+      projectId: assignedProjectId,
       workspaceId: ctx.workspaceId,
       authorId: ctx.userId,
       publishedAt: draft ? null : new Date(),

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { createFolderAction } from "@/app/w/[slug]/files/actions";
 import { FieldError, FormError } from "@/components/form-error";
+import { ProjectSelect, type ProjectOption } from "@/components/project-select";
 import { SubmitButton } from "@/components/submit-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,10 +26,12 @@ import type { ActionState } from "@/lib/action-state";
 function NewFolderForm({
   slug,
   parentId,
+  projects,
   onDone,
 }: {
   slug: string;
   parentId: string | null;
+  projects: ProjectOption[];
   onDone: () => void;
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
@@ -67,6 +70,15 @@ function NewFolderForm({
         />
         <FieldError errors={state.fieldErrors?.name} />
       </div>
+      {/* A subfolder follows its parent project, so only root folders pick one. */}
+      {parentId ? null : (
+        <ProjectSelect
+          projects={projects}
+          id="new-folder-project"
+          defaultValue={state.values?.projectId ?? ""}
+          errors={state.fieldErrors?.projectId}
+        />
+      )}
       <DialogFooter>
         <DialogClose render={<Button type="button" variant="outline" />}>Vazgeç</DialogClose>
         <SubmitButton pending={pending} pendingText="Oluşturuluyor">
@@ -77,7 +89,15 @@ function NewFolderForm({
   );
 }
 
-export function NewFolderDialog({ slug, parentId }: { slug: string; parentId: string | null }) {
+export function NewFolderDialog({
+  slug,
+  parentId,
+  projects = [],
+}: {
+  slug: string;
+  parentId: string | null;
+  projects?: ProjectOption[];
+}) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -87,7 +107,7 @@ export function NewFolderDialog({ slug, parentId }: { slug: string; parentId: st
       </DialogTrigger>
       <DialogContent>
         {/* Remount on every open so the form starts empty. */}
-        {open ? <NewFolderForm slug={slug} parentId={parentId} onDone={() => setOpen(false)} /> : null}
+        {open ? <NewFolderForm slug={slug} parentId={parentId} projects={projects} onDone={() => setOpen(false)} /> : null}
       </DialogContent>
     </Dialog>
   );

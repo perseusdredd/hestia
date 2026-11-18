@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { agendaTimeLabel } from "@/lib/event-labels";
 import { keyToCalendarDate } from "@/lib/istanbul-time";
 
+import type { ProjectOption } from "@/components/project-select";
 import { EventDialog, type DialogTarget } from "./event-dialog";
 import type { CalDay, CalEvent, CalMember } from "./types";
 
@@ -24,6 +25,7 @@ export function CalendarView({
   days,
   events,
   members,
+  projects = [],
   todayKey,
   defaultDayKey,
   toolbar,
@@ -33,6 +35,8 @@ export function CalendarView({
   events: CalEvent[];
   /** Workspace members, for the invitee picker. */
   members: CalMember[];
+  /** Active projects, offered when creating an event. */
+  projects?: ProjectOption[];
   todayKey: string;
   /** Day pre-filled by the "Yeni etkinlik" button (today if in this month, else the 1st). */
   defaultDayKey: string;
@@ -265,7 +269,7 @@ export function CalendarView({
         )}
       </section>
 
-      <EventDialog slug={slug} target={target} members={members} onClose={close} />
+      <EventDialog slug={slug} target={target} members={members} projects={projects} onClose={close} />
     </div>
   );
 }

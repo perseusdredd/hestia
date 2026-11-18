@@ -12,6 +12,7 @@ import { displayName } from "@/components/user-avatar";
 import { requireWorkspace } from "@/lib/tenant";
 import { listMemberUsers } from "@/server/workspaces";
 import { listInviteeIdsByEvent, listMonth } from "@/server/calendar";
+import { listProjectOptions } from "@/server/projects";
 import { countComments } from "@/server/comments";
 import {
   eventDayKeys,
@@ -43,10 +44,11 @@ export default async function CalendarPage({
 
   const { grid, events, occurrences, todos } = await listMonth(ctx, month);
   const eventIds = events.map((e) => e.id);
-  const [commentCounts, inviteeIds, memberUsers] = await Promise.all([
+  const [commentCounts, inviteeIds, memberUsers, projects] = await Promise.all([
     countComments(ctx, "event", eventIds),
     listInviteeIdsByEvent(ctx, eventIds),
     listMemberUsers(ctx),
+    listProjectOptions(ctx),
   ]);
   const members: CalMember[] = memberUsers.map((u) => ({ id: u.id, label: displayName(u) }));
 
@@ -109,6 +111,7 @@ export default async function CalendarPage({
         days={days}
         events={calEvents}
         members={members}
+        projects={projects}
         todayKey={todayKey}
         defaultDayKey={defaultDayKey}
         toolbar={

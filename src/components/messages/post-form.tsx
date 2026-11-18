@@ -10,6 +10,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ActionState } from "@/lib/action-state";
+import { ProjectSelect, type ProjectOption } from "@/components/project-select";
 import type { MessageCategoryDto } from "@/server/message-categories";
 
 type Action = (state: ActionState, formData: FormData) => Promise<ActionState>;
@@ -27,6 +28,7 @@ export function PostForm({
   cancel,
   members = [],
   categories = [],
+  projects = [],
 }: {
   action: Action;
   post?: { id: string; title: string; body: string; categoryId?: string | null; isDraft?: boolean };
@@ -36,6 +38,8 @@ export function PostForm({
   /** Offered when typing "@" in the body. */
   members?: MentionMember[];
   categories?: MessageCategoryDto[];
+  /** Offered only when creating (no `post`). */
+  projects?: ProjectOption[];
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, {});
 
@@ -91,6 +95,14 @@ export function PostForm({
           <FieldError errors={state.fieldErrors?.categoryId} />
         </div>
       ) : null}
+      {post ? null : (
+        <ProjectSelect
+          projects={projects}
+          id={`${idPrefix}-project`}
+          defaultValue={state.values?.projectId ?? ""}
+          errors={state.fieldErrors?.projectId}
+        />
+      )}
       <div className="grid gap-1.5">
         <Label htmlFor={`${idPrefix}-body`}>Mesaj</Label>
         <MentionEditor

@@ -37,6 +37,7 @@ import {
   recordActivity,
 } from "@/server/activity";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
+import { assertAssignableProject, projectIdField } from "@/server/projects";
 
 /*
  * Files & Docs service. Every ctx-first function scopes all reads and writes by
@@ -90,7 +91,12 @@ const docContentSchema = z
   .max(100_000, "Doküman çok uzun (en fazla 100.000 karakter).")
   .transform((v) => v.replace(/\r\n?/g, "\n"));
 
-const createFolderSchema = z.object({ name: folderNameSchema, parentId: optionalFolderId });
+const createFolderSchema = z.object({
+  name: folderNameSchema,
+  parentId: optionalFolderId,
+  /** Optional project for a root folder; a subfolder always follows its parent. */
+  projectId: projectIdField,
+});
 const renameSchema = (name: z.ZodType<string>) => z.object({ id: idSchema, name });
 const moveSchema = z.object({ id: idSchema, targetFolderId: optionalFolderId });
 const pendingUploadSchema = z.object({
@@ -366,17 +372,20 @@ export async function createFolder(ctx: TenantContext, input: unknown) {
   const data = parseInput(createFolderSchema, input);
   const folder = await db.$transaction(async (tx) => {
     await lockTree(tx, ctx.workspaceId);
+    let projectId: string | null = null;
     if (data.parentId) {
-      await findFolder(tx, ctx, data.parentId);
+      projectId = (await findFolder(tx, ctx, data.parentId)).projectId;
       const chain = await ancestorChain(tx, ctx, data.parentId);
       if (chain.length >= MAX_FOLDER_DEPTH) {
         throw new ServiceError("VALIDATION", "Klasörler en fazla 20 seviye iç içe olabilir.");
       }
     }
+    else projectId = await assertAssignableProject(ctx, data.projectId, tx);
     await assertUniqueFolderName(tx, ctx, data.parentId, data.name);
     return tx.folder.create({
       data: {
         workspaceId: ctx.workspaceId,
+        projectId,
         parentId: data.parentId,
         createdById: ctx.userId,
         name: data.name,

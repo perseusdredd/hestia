@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { createListAction, updateListAction } from "@/app/w/[slug]/todos/actions";
 import { FieldError, FormError } from "@/components/form-error";
+import { ProjectSelect, type ProjectOption } from "@/components/project-select";
 import { SubmitButton } from "@/components/submit-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +30,7 @@ function ListForm({
   listId,
   initial,
   trigger,
+  projects = [],
 }: {
   title: string;
   submitLabel: string;
@@ -36,6 +38,7 @@ function ListForm({
   listId?: string;
   initial?: { name: string; description: string | null };
   trigger: React.ReactElement;
+  projects?: ProjectOption[];
 }) {
   const [open, setOpen] = useState(false);
   // New key on every open: fresh action state, no stale error or rejected values.
@@ -59,6 +62,7 @@ function ListForm({
           action={action}
           listId={listId}
           initial={initial}
+          projects={projects}
           onSaved={close}
         />
       </DialogContent>
@@ -73,6 +77,7 @@ function ListFormBody({
   listId,
   initial,
   onSaved,
+  projects = [],
 }: {
   title: string;
   submitLabel: string;
@@ -80,6 +85,7 @@ function ListFormBody({
   listId?: string;
   initial?: { name: string; description: string | null };
   onSaved: () => void;
+  projects?: ProjectOption[];
 }) {
   const [state, formAction, pending] = useActionState(action, {});
 
@@ -127,6 +133,14 @@ function ListFormBody({
             />
             <FieldError errors={state.fieldErrors?.description} />
           </div>
+          {listId ? null : (
+            <ProjectSelect
+              projects={projects}
+              id="list-project-new"
+              defaultValue={state.values?.projectId ?? ""}
+              errors={state.fieldErrors?.projectId}
+            />
+          )}
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>Vazgeç</DialogClose>
             <SubmitButton pending={pending} pendingText="Kaydediliyor...">
@@ -137,12 +151,13 @@ function ListFormBody({
   );
 }
 
-export function NewListButton({ slug }: { slug: string }) {
+export function NewListButton({ slug, projects = [] }: { slug: string; projects?: ProjectOption[] }) {
   return (
     <ListForm
       title="Yeni liste"
       submitLabel="Oluştur"
       action={createListAction.bind(null, slug)}
+      projects={projects}
       trigger={
         <Button>
           <Plus aria-hidden />

@@ -8,6 +8,7 @@ import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, recordActivity, recordTodoToggled } from "@/server/activity";
 import { conflict, forbidden, notFound, ServiceError, parseInput } from "@/server/errors";
 import { notifyTodoAssigned } from "@/server/notifications";
+import { assertAssignableProject, projectIdField } from "@/server/projects";
 import { autoSubscribe } from "@/server/subscriptions";
 import { isWorkspaceMember } from "@/server/workspaces";
 
@@ -55,6 +56,8 @@ const sectionNameSchema = z
 const createListSchema = z.object({
   name: listNameSchema,
   description: listDescriptionSchema.optional(),
+  /** Optional project; empty / omitted = "Genel". */
+  projectId: projectIdField,
 });
 const updateListSchema = z.object({
   name: listNameSchema.optional(),
@@ -347,6 +350,7 @@ async function lockListPositions(tx: Prisma.TransactionClient, workspaceId: stri
 
 export async function createTodoList(ctx: TenantContext, input: unknown) {
   const data = parseInput(createListSchema, input);
+  const projectId = await assertAssignableProject(ctx, data.projectId);
   const list = await db.$transaction(async (tx) => {
     await lockListPositions(tx, ctx.workspaceId);
     const max = await tx.todoList.aggregate({
@@ -359,6 +363,7 @@ export async function createTodoList(ctx: TenantContext, input: unknown) {
         createdById: ctx.userId,
         name: data.name,
         description: data.description ?? null,
+        projectId,
         position: (max._max.position ?? -1) + 1,
       },
     });

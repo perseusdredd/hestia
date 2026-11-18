@@ -6,6 +6,7 @@ import {
   CalendarDays,
   CheckSquare,
   Columns3,
+  FolderKanban,
   FolderOpen,
   House,
   UserRound,
@@ -18,7 +19,7 @@ import {
 
 export type NavItem = {
   /** Path segment under /w/[slug]; "" is the overview. */
-  segment: "" | "my" | "reports" | "bookmarks" | "messages" | "todos" | "files" | "calendar" | "cards" | "chat" | "checkins" | "activity" | "trash" | "settings";
+  segment: "" | "my" | "reports" | "bookmarks" | "projects" | "messages" | "todos" | "files" | "calendar" | "cards" | "chat" | "checkins" | "activity" | "trash" | "settings";
   label: string;
   icon: LucideIcon;
 };
@@ -29,6 +30,7 @@ export const NAV_ITEMS: NavItem[] = [
   { segment: "my", label: "Benim İşlerim", icon: UserRound },
   { segment: "reports", label: "Raporlar", icon: BarChart3 },
   { segment: "bookmarks", label: "Yer imlerim", icon: Bookmark },
+  { segment: "projects", label: "Projeler", icon: FolderKanban },
   { segment: "messages", label: "Mesajlar", icon: MessageSquare },
   { segment: "todos", label: "Yapılacaklar", icon: CheckSquare },
   { segment: "files", label: "Dosyalar", icon: FolderOpen },

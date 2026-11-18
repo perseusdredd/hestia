@@ -17,6 +17,7 @@ import { canModify } from "@/lib/roles";
 import { thumbnailEligible } from "@/lib/storage/inline";
 import type { TenantContext } from "@/lib/tenant-context";
 import { FOLDER_ITEMS_MAX, listFolderContents, listFolderTree } from "@/server/files";
+import { listProjectOptions } from "@/server/projects";
 
 import { orNotFound } from "./load";
 import { documentHref, fileViewHref, folderHref, newDocumentHref } from "./paths";
@@ -81,6 +82,7 @@ export async function FolderView({ slug, ctx, folderId }: { slug: string; ctx: T
   const [{ folder, breadcrumbs, folders, files, documents, truncated }, tree] = await orNotFound(() =>
     Promise.all([listFolderContents(ctx, folderId), listFolderTree(ctx)]),
   );
+  const projects = folderId ? [] : await listProjectOptions(ctx);
 
   const rows: Row[] = [
     ...folders.map<Row>((f) => ({
@@ -141,7 +143,7 @@ export async function FolderView({ slug, ctx, folderId }: { slug: string; ctx: T
                   current
                 />
               ) : null}
-              <NewFolderDialog slug={slug} parentId={currentId} />
+              <NewFolderDialog slug={slug} parentId={currentId} projects={projects} />
               <Link href={newDocumentHref(slug, currentId)} className={buttonVariants({ variant: "outline" })}>
                 <FilePlus2 aria-hidden />
                 Yeni doküman

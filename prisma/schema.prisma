@@ -38,6 +38,7 @@ model User {
   todosAssigned   TodoItem[]    @relation("TodoAssignee")
   todoAssignments TodoAssignee[]
   cardsCreated    Card[]        @relation("CardCreator")
+  projectsCreated Project[]     @relation("ProjectCreator")
   cardsAssigned   Card[]        @relation("CardAssignee")
   foldersCreated  Folder[]
   filesUploaded   File[]
@@ -140,6 +141,7 @@ model Workspace {
   checkinAnswers   CheckinAnswer[]
   cardColumns      CardColumn[]
   cards            Card[]
+  projects         Project[]
 }
 
 model Membership {
@@ -198,8 +200,11 @@ model Post {
   // Draft: publishedAt is null (visible only to the author). Rows created without it count as published.
   publishedAt DateTime? @default(now())
   categoryId  String?
+  // Optional project (null = "Genel", workspace-level).
+  projectId   String?
 
   workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   author    User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
   category  MessageCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   comments  Comment[]
@@ -207,6 +212,7 @@ model Post {
   @@index([workspaceId, createdAt])
   @@index([workspaceId, deletedAt])
   @@index([workspaceId, categoryId])
+  @@index([workspaceId, projectId])
 }
 
 model MessageCategory {
@@ -273,8 +279,11 @@ model TodoList {
   // Soft delete: set while the row is in the trash (purged after 30 days by the cleanup cron).
   deletedAt   DateTime?
   deletedById String?
+  // Optional project (null = "Genel", workspace-level).
+  projectId   String?
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdBy User       @relation(fields: [createdById], references: [id], onDelete: Cascade)
   items     TodoItem[]
   sections  TodoSection[]
@@ -282,6 +291,7 @@ model TodoList {
 
   @@index([workspaceId, position])
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, projectId])
 }
 
 model HillSnapshot {
@@ -379,8 +389,11 @@ model Folder {
   // Soft delete: set while the row is in the trash (purged after 30 days by the cleanup cron).
   deletedAt   DateTime?
   deletedById String?
+  // Optional project (null = "Genel", workspace-level).
+  projectId   String?
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
   children  Folder[]   @relation("FolderTree")
   createdBy User       @relation(fields: [createdById], references: [id], onDelete: Cascade)
@@ -389,6 +402,7 @@ model Folder {
 
   @@index([workspaceId, parentId])
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, projectId])
 }
 
 model File {
@@ -460,14 +474,18 @@ model Event {
   // recurrenceUntil (inclusive, end of an Istanbul day) caps the series, null = open-ended.
   recurrence      String    @default("NONE")
   recurrenceUntil DateTime?
+  // Optional project (null = "Genel", workspace-level).
+  projectId   String?
 
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdBy User           @relation(fields: [createdById], references: [id], onDelete: Cascade)
   comments  Comment[]
   invitees  EventInvitee[]
 
   @@index([workspaceId, startsAt])
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, projectId])
 }
 
 model EventInvitee {
@@ -778,4 +796,29 @@ model Card {
 
   @@index([workspaceId])
   @@index([workspaceId, columnId, deletedAt])
+}
+
+// ------------------------------------------------------------ Projects ----
+
+model Project {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  slug        String
+  description String?  @db.Text
+  archived    Boolean  @default(false)
+  position    Int      @default(0)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User       @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  posts     Post[]
+  todoLists TodoList[]
+  folders   Folder[]
+  events    Event[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId])
 }

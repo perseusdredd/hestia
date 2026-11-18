@@ -34,6 +34,7 @@ export async function createListAction(
   const values = {
     name: formString(formData, "name"),
     description: formString(formData, "description"),
+    projectId: formString(formData, "projectId"),
   };
   try {
     const { ctx } = await requireWorkspace(slug);
