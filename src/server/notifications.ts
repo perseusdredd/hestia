@@ -99,8 +99,20 @@ export async function notify(ctx: TenantContext, input: NotifyInput): Promise<nu
         WHERE "workspaceId" = ${ctx.workspaceId} AND "userId" = ANY(${wanted}::text[])
         FOR SHARE`;
       if (members.length === 0) return 0;
+      // One batched lookup: recipients who muted this type in this workspace.
+      const muted = await tx.notificationPreference.findMany({
+        where: {
+          workspaceId: ctx.workspaceId,
+          userId: { in: members.map((m) => m.userId) },
+          mutedTypes: { has: data.type },
+        },
+        select: { userId: true },
+      });
+      const mutedIds = new Set(muted.map((m) => m.userId));
+      const recipients = members.filter((m) => !mutedIds.has(m.userId));
+      if (recipients.length === 0) return 0;
       const res = await tx.notification.createMany({
-        data: members.map((m) => ({
+        data: recipients.map((m) => ({
           workspaceId: ctx.workspaceId,
           userId: m.userId,
           actorId: ctx.userId,

@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 import { formString, toActionState, type ActionState } from "@/lib/action-state";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { requireWorkspace } from "@/lib/tenant";
+import { NOTIFICATION_TYPES } from "@/server/notifications";
+import { setMutedTypes } from "@/server/notification-preferences";
 import { hitInviteRateLimit } from "@/server/rate-limit";
 import {
   changeMemberRole,
@@ -162,4 +164,24 @@ export async function deleteWorkspaceAction(
   }
   revalidatePath("/app");
   redirect("/app");
+}
+
+/** Saves the caller's muted notification types (form: checked "enabled" types stay on, the rest are muted). */
+export async function saveNotificationPreferencesAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    const enabled = new Set(formData.getAll("enabled").map(String));
+    await setMutedTypes(
+      ctx,
+      NOTIFICATION_TYPES.filter((t) => !enabled.has(t)),
+    );
+    revalidate(slug);
+    return { ok: true, message: "Bildirim tercihleri kaydedildi." };
+  } catch (e) {
+    return toActionState(e);
+  }
 }

@@ -14,10 +14,11 @@ import {
   safeNotificationPath,
   unreadCount,
 } from "@/server/notifications";
+import { getMutedTypes, setMutedTypes } from "@/server/notification-preferences";
 import { createTodoItem, createTodoList, updateTodoItem } from "@/server/todos";
 import { acceptInvitation, createInvitation, removeMember } from "@/server/workspaces";
 
-import { cleanup, createMember, createTestUser, createTestWorkspace } from "./helpers";
+import { addMember, cleanup, createMember, createTestUser, createTestWorkspace } from "./helpers";
 
 afterAll(async () => {
   await cleanup();
@@ -403,5 +404,46 @@ describe("notifications service", () => {
       }
       expect(await rowsFor(owner.workspaceId)).toHaveLength(0);
     });
+  });
+});
+
+describe("notification preferences", () => {
+  afterAll(async () => {
+    await cleanup();
+  });
+
+  it("muted users skip that type only; defaults unaffected", async () => {
+    const o = await createTestUser();
+    const { workspace, ctx } = await createTestWorkspace(o.id);
+    const { user: m, ctx: mCtx } = await createMember(workspace.id);
+    const { user: d } = await createMember(workspace.id);
+    expect(await getMutedTypes(mCtx)).toEqual([]);
+    await setMutedTypes(mCtx, ["POST_CREATED", "POST_CREATED"]);
+    expect(await getMutedTypes(mCtx)).toEqual(["POST_CREATED"]);
+
+    const base = { recipientIds: [m.id, d.id], title: "t", path: "todos" };
+    expect(await notify(ctx, { ...base, type: "POST_CREATED" })).toBe(1);
+    expect(await db.notification.count({ where: { workspaceId: workspace.id, userId: m.id } })).toBe(0);
+    expect(await db.notification.count({ where: { workspaceId: workspace.id, userId: d.id } })).toBe(1);
+
+    expect(await notify(ctx, { ...base, type: "EVENT_CREATED" })).toBe(2);
+    expect(await db.notification.count({ where: { workspaceId: workspace.id, userId: m.id } })).toBe(1);
+
+    await setMutedTypes(mCtx, []);
+    expect(await notify(ctx, { ...base, type: "POST_CREATED" })).toBe(2);
+  });
+
+  it("is per workspace and validates types", async () => {
+    const o = await createTestUser();
+    const m = await createTestUser();
+    const a = await createTestWorkspace(o.id);
+    const b = await createTestWorkspace(o.id);
+    const mA = await addMember(a.workspace.id, m.id, "MEMBER");
+    await addMember(b.workspace.id, m.id, "MEMBER");
+    await setMutedTypes(mA, ["EVENT_CREATED"]);
+    expect(
+      await notify(b.ctx, { recipientIds: [m.id], type: "EVENT_CREATED", title: "t", path: "todos" }),
+    ).toBe(1);
+    expect(await code(setMutedTypes(mA, ["NOPE"]))).toBe("VALIDATION");
   });
 });

@@ -10,6 +10,7 @@ import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDate } from "@/lib/format";
 import { hasRole, ROLE_LABELS, type Role } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
+import { getMutedTypes } from "@/server/notification-preferences";
 import { listMembers, listPendingInvitations } from "@/server/workspaces";
 
 import {
@@ -23,6 +24,7 @@ import {
   InviteForm,
   InviteLinkField,
   InviteLinkForm,
+  NotificationPreferencesForm,
   RenameWorkspaceForm,
   RoleSelect,
 } from "./settings-forms";
@@ -35,9 +37,10 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
   const isAdmin = hasRole(ctx.role, "ADMIN");
   const isOwner = ctx.role === "OWNER";
 
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, mutedTypes] = await Promise.all([
     listMembers(ctx),
     isAdmin ? listPendingInvitations(ctx) : Promise.resolve([]),
+    getMutedTypes(ctx),
   ]);
 
   const origin = isAdmin ? await getRequestOrigin() : "";
@@ -205,6 +208,18 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
           </CardContent>
         </Card>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Bildirim tercihleri</CardTitle>
+          <CardDescription>
+            Bu çalışma alanında hangi bildirimleri almak istediğinizi seçin. Yalnızca sizin için geçerlidir.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <NotificationPreferencesForm slug={slug} muted={mutedTypes} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ActionState } from "@/lib/action-state";
 import { ROLE_LABELS, type Role } from "@/lib/roles";
+import { NOTIFICATION_TYPE_LABELS } from "@/lib/notification-type-labels";
+import type { NotificationType } from "@/server/notifications";
 
 import {
   changeRoleAction,
@@ -18,6 +20,7 @@ import {
   deleteWorkspaceAction,
   inviteMemberAction,
   renameWorkspaceAction,
+  saveNotificationPreferencesAction,
   type InviteResult,
 } from "./actions";
 
@@ -262,6 +265,42 @@ export function DeleteWorkspaceForm({ slug }: { slug: string }) {
           disabled={!matches}
         >
           Çalışma alanını kalıcı olarak sil
+        </SubmitButton>
+      </div>
+    </form>
+  );
+}
+
+export function NotificationPreferencesForm({ slug, muted }: { slug: string; muted: string[] }) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(
+    saveNotificationPreferencesAction.bind(null, slug),
+    {},
+  );
+  useEffect(() => {
+    if (state.ok && state.message) toast.success(state.message);
+  }, [state]);
+  return (
+    <form action={action} className="grid gap-3">
+      <ul className="grid gap-2">
+        {(Object.keys(NOTIFICATION_TYPE_LABELS) as NotificationType[]).map((type) => (
+          <li key={type}>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="enabled"
+                value={type}
+                defaultChecked={!muted.includes(type)}
+                className="size-4"
+              />
+              {NOTIFICATION_TYPE_LABELS[type]}
+            </label>
+          </li>
+        ))}
+      </ul>
+      {!state.ok ? <FormError message={state.error} /> : null}
+      <div>
+        <SubmitButton pending={pending} pendingText="Kaydediliyor">
+          Kaydet
         </SubmitButton>
       </div>
     </form>
