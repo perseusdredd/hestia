@@ -12,6 +12,7 @@ import {
   type CommentSubjectType,
 } from "@/server/comments";
 import { parseInput } from "@/server/errors";
+import { visiblePostWhere } from "@/server/post-visibility";
 
 /**
  * Workspace search. Every query below is scoped by ctx.workspaceId.
@@ -220,6 +221,7 @@ export async function searchWorkspace(
         where: {
           workspaceId,
           deletedAt: null,
+          AND: [visiblePostWhere(ctx)],
           OR: anyFieldContains<Prisma.PostWhereInput>(["title", "body"], variants),
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -247,7 +249,7 @@ export async function searchWorkspace(
             // The subject (whichever of the four it is) must be in the same workspace too.
             {
               OR: [
-                { post: { workspaceId, deletedAt: null } },
+                { post: { workspaceId, deletedAt: null, ...visiblePostWhere(ctx) } },
                 { todoItem: { workspaceId, deletedAt: null } },
                 { document: { workspaceId, deletedAt: null } },
                 { event: { workspaceId, deletedAt: null } },

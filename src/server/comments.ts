@@ -7,6 +7,7 @@ import { canModify } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, recordActivity } from "@/server/activity";
 import { forbidden, notFound, parseInput } from "@/server/errors";
+import { visiblePostWhere } from "@/server/post-visibility";
 import {
   notify,
   NOTIFICATION_BODY_MAX,
@@ -136,7 +137,10 @@ async function loadSubject(ctx: TenantContext, input: unknown): Promise<LoadedSu
   let found: LoadedSubject | null = null;
   switch (subject.type) {
     case "post": {
-      const row = await db.post.findFirst({ where, select: { id: true, title: true, authorId: true } });
+      const row = await db.post.findFirst({
+        where: { ...where, ...visiblePostWhere(ctx) },
+        select: { id: true, title: true, authorId: true },
+      });
       if (row) found = { ...subject, title: row.title, ownerIds: [row.authorId] };
       break;
     }

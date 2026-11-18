@@ -9,10 +9,20 @@ import {
   createPost,
   deletePost,
   listPosts,
+  publishPost,
   setPostPinned,
   updatePost,
+  type PostListFilter,
   type PostListItem,
 } from "@/server/messages";
+
+function postValues(formData: FormData) {
+  return {
+    title: formString(formData, "title"),
+    body: formString(formData, "body"),
+    categoryId: formString(formData, "categoryId"),
+  };
+}
 
 function revalidate(slug: string) {
   revalidatePath(`/w/${slug}/messages`, "layout");
@@ -23,11 +33,12 @@ export async function createPostAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const values = { title: formString(formData, "title"), body: formString(formData, "body") };
+  const values = postValues(formData);
+  const draft = formString(formData, "intent") === "draft";
   let postId: string;
   try {
     const { ctx } = await requireWorkspace(slug);
-    postId = (await createPost(ctx, values)).id;
+    postId = (await createPost(ctx, { ...values, draft })).id;
     revalidate(slug);
   } catch (e) {
     return { ...toActionState(e), values };
@@ -40,14 +51,35 @@ export async function updatePostAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const values = { title: formString(formData, "title"), body: formString(formData, "body") };
+  const values = postValues(formData);
   try {
     const { ctx } = await requireWorkspace(slug);
-    await updatePost(ctx, formString(formData, "id"), values);
+    const id = formString(formData, "id");
+    await updatePost(ctx, id, values);
+    if (formString(formData, "intent") === "publish") {
+      await publishPost(ctx, id);
+      revalidate(slug);
+      return { ok: true, message: "Gönderi yayınlandı.", values };
+    }
     revalidate(slug);
     return { ok: true, message: "Gönderi güncellendi.", values };
   } catch (e) {
     return { ...toActionState(e), values };
+  }
+}
+
+export async function publishPostAction(
+  slug: string,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    await publishPost(ctx, formString(formData, "id"));
+    revalidate(slug);
+    return { ok: true, message: "Gönderi yayınlandı." };
+  } catch (e) {
+    return toActionState(e);
   }
 }
 
@@ -86,7 +118,12 @@ export async function togglePinAction(
 export async function loadMorePostsAction(
   slug: string,
   cursor: string,
+  filter: PostListFilter = {},
 ): Promise<{ items: PostListItem[]; hasMore: boolean; nextCursor: string | null }> {
   const { ctx } = await requireWorkspace(slug);
-  return listPosts(ctx, { cursor: typeof cursor === "string" ? cursor : "" });
+  return listPosts(ctx, {
+    cursor: typeof cursor === "string" ? cursor : "",
+    categoryId: typeof filter?.categoryId === "string" ? filter.categoryId : null,
+    draftsOnly: filter?.draftsOnly === true,
+  });
 }

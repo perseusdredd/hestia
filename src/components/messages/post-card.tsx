@@ -2,6 +2,7 @@ import Link from "next/link";
 import { MessageSquare, Pin } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { CategoryBadge } from "@/components/messages/category-badge";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatRelative } from "@/lib/format";
 import type { PostListItem } from "@/server/messages";
@@ -18,6 +19,12 @@ export function PostCard({ slug, post }: { slug: string; post: PostListItem }) {
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start gap-2">
             <h2 className="min-w-0 flex-1 truncate font-medium">{post.title}</h2>
+            {post.isDraft ? (
+              <Badge variant="outline" className="shrink-0">
+                Taslak
+              </Badge>
+            ) : null}
+            {post.category ? <CategoryBadge category={post.category} className="shrink-0" /> : null}
             {post.pinned ? (
               <Badge variant="secondary" className="shrink-0">
                 <Pin className="size-3" aria-hidden />

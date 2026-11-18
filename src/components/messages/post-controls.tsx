@@ -1,11 +1,12 @@
 "use client";
 
 import { useActionState, useCallback, useEffect, useState } from "react";
-import { Pencil, Pin, PinOff, Trash2 } from "lucide-react";
+import { Pencil, Pin, PinOff, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
   deletePostAction,
+  publishPostAction,
   togglePinAction,
   updatePostAction,
 } from "@/app/w/[slug]/messages/actions";
@@ -13,6 +14,7 @@ import { ConfirmAction } from "@/components/confirm-action";
 import type { MentionMember } from "@/components/mention-editor";
 import { Button } from "@/components/ui/button";
 import type { ActionState } from "@/lib/action-state";
+import type { MessageCategoryDto } from "@/server/message-categories";
 
 import { PostForm } from "./post-form";
 
@@ -38,6 +40,27 @@ function PinButton({ slug, postId, pinned }: { slug: string; postId: string; pin
   );
 }
 
+function PublishButton({ slug, postId }: { slug: string; postId: string }) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(
+    publishPostAction.bind(null, slug),
+    {},
+  );
+  useEffect(() => {
+    if (state.ok && state.message) toast.success(state.message);
+    else if (state.error) toast.error(state.error);
+  }, [state]);
+
+  return (
+    <form action={action}>
+      <input type="hidden" name="id" value={postId} />
+      <Button type="submit" size="sm" disabled={pending} aria-busy={pending}>
+        <Send aria-hidden />
+        Yayınla
+      </Button>
+    </form>
+  );
+}
+
 /**
  * Wraps the read-only post content (`children`, rendered on the server) and
  * swaps it for an edit form on demand. Buttons are shown according to the
@@ -49,14 +72,16 @@ export function PostControls({
   canModify,
   canPin,
   members = [],
+  categories = [],
   children,
 }: {
   slug: string;
-  post: { id: string; title: string; body: string; pinned: boolean };
+  post: { id: string; title: string; body: string; pinned: boolean; categoryId: string | null; isDraft: boolean };
   canModify: boolean;
   canPin: boolean;
   /** Offered when typing "@" while editing the body. */
   members?: MentionMember[];
+  categories?: MessageCategoryDto[];
   children: React.ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
@@ -70,6 +95,7 @@ export function PostControls({
         submitLabel="Kaydet"
         onDone={stopEditing}
         members={members}
+        categories={categories}
         cancel={
           <Button type="button" variant="ghost" onClick={stopEditing}>
             Vazgeç
@@ -83,6 +109,7 @@ export function PostControls({
     <div className="space-y-4">
       {canModify || canPin ? (
         <div className="flex flex-wrap items-center gap-2">
+          {post.isDraft && canModify ? <PublishButton slug={slug} postId={post.id} /> : null}
           {canPin ? <PinButton slug={slug} postId={post.id} pinned={post.pinned} /> : null}
           {canModify ? (
             <>

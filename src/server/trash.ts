@@ -15,6 +15,7 @@ import {
 } from "@/server/activity";
 import { deleteObjects, restoreFolderTree } from "@/server/files";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
+import { visiblePostWhere } from "@/server/post-visibility";
 
 /*
  * Trash (soft delete). Posts, to-dos, to-do lists, events, files, documents and
@@ -85,7 +86,7 @@ export async function listTrash(ctx: TenantContext): Promise<TrashItemDTO[]> {
 
   const [posts, items, lists, events, files, documents, folders] = await Promise.all([
     db.post.findMany({
-      where: { ...base, ...mine("authorId") },
+      where: { ...base, ...mine("authorId"), ...visiblePostWhere(ctx) },
       orderBy: order,
       take,
       select: { id: true, title: true, deletedAt: true, deletedById: true },

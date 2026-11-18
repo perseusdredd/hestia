@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import type { TenantContext } from "@/lib/tenant-context";
 import { notFound, parseInput } from "@/server/errors";
+import { visiblePostWhere } from "@/server/post-visibility";
 
 /**
  * Boosts ("Tepkiler"): short emoji reactions on posts and comments.
@@ -41,7 +42,7 @@ async function requireSubject(ctx: TenantContext, input: unknown): Promise<React
   let found: { id: string } | null = null;
   if (s.type === "post") {
     found = await db.post.findFirst({
-      where: { id: s.id, workspaceId: ctx.workspaceId, deletedAt: null },
+      where: { id: s.id, workspaceId: ctx.workspaceId, deletedAt: null, ...visiblePostWhere(ctx) },
       select: { id: true },
     });
   } else {

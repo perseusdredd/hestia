@@ -8,7 +8,7 @@ import { parseMentionIds } from "@/lib/mentions";
 import { canModify, hasRole } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, postActivityPath, recordActivity } from "@/server/activity";
-import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
+import { conflict, forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import {
   addComment,
   deleteComment as deleteGenericComment,
@@ -17,13 +17,37 @@ import {
   updateComment as updateGenericComment,
 } from "@/server/comments";
 import { notify } from "@/server/notifications";
+import { visiblePostWhere } from "@/server/post-visibility";
 
 const idSchema = z.string().min(1).max(64);
 
 const postSchema = z.object({
   title: z.string().trim().min(1, "Başlık gerekli.").max(200, "Başlık en fazla 200 karakter olabilir."),
   body: z.string().trim().min(1, "Mesaj gerekli.").max(20000, "Mesaj çok uzun (en fazla 20.000 karakter)."),
+  // Empty string / null = no category; undefined on update = keep the current one.
+  categoryId: z
+    .string()
+    .max(64)
+    .nullish()
+    .transform((v) => (v === undefined ? undefined : v || null)),
 });
+
+const createPostSchema = postSchema.extend({
+  /** true = save as a draft (visible only to the author, nothing is announced). */
+  draft: z.boolean().optional(),
+});
+
+/** The category must belong to the workspace. */
+async function assertCategory(ctx: TenantContext, categoryId: string | null | undefined) {
+  if (!categoryId) return;
+  const found = await db.messageCategory.findFirst({
+    where: { id: categoryId, workspaceId: ctx.workspaceId },
+    select: { id: true },
+  });
+  if (!found) {
+    throw new ServiceError("VALIDATION", "Kategori bulunamadı.", { categoryId: ["Kategori bulunamadı."] });
+  }
+}
 
 const authorSelect = { select: { id: true, name: true, email: true, image: true } } as const;
 
@@ -34,10 +58,24 @@ export type PostListItem = {
   title: string;
   excerpt: string;
   pinned: boolean;
+  /** Not published yet; only the author sees it. */
+  isDraft: boolean;
+  category: { id: string; name: string; emoji: string } | null;
   createdAt: Date;
   updatedAt: Date;
   author: { id: string; name: string | null; email: string; image: string | null };
   commentCount: number;
+};
+
+const categorySelect = { select: { id: true, name: true, emoji: true } } as const;
+
+export type PostListFilter = {
+  /** Only posts in this category. */
+  categoryId?: string | null;
+  /** Only the caller's own drafts. */
+  draftsOnly?: boolean;
+  /** Include the caller's own drafts (default true). The overview passes false. */
+  includeDrafts?: boolean;
 };
 
 
@@ -75,7 +113,7 @@ function decodeCursor(cursor: string) {
  */
 export async function listPosts(
   ctx: TenantContext,
-  opts: { cursor?: string | null; take?: number } = {},
+  opts: { cursor?: string | null; take?: number } & PostListFilter = {},
 ): Promise<{ items: PostListItem[]; hasMore: boolean; nextCursor: string | null }> {
   const take = Math.min(Math.max(opts.take ?? POSTS_PAGE_SIZE, 1), 50);
   const after = opts.cursor ? decodeCursor(opts.cursor) : null;
@@ -87,17 +125,22 @@ export async function listPosts(
         ],
       }
     : null;
-  const where: Prisma.PostWhereInput = { workspaceId: ctx.workspaceId, deletedAt: null };
+  const and: Prisma.PostWhereInput[] = [];
+  if (opts.draftsOnly) and.push({ publishedAt: null, authorId: ctx.userId });
+  else if (opts.includeDrafts === false) and.push({ publishedAt: { not: null } });
+  else and.push(visiblePostWhere(ctx));
+  if (opts.categoryId) and.push({ categoryId: parseInput(idSchema, opts.categoryId) });
   if (after && olderThan) {
-    where.OR = after.pinned
-      ? [{ pinned: true, ...olderThan }, { pinned: false }]
-      : [{ pinned: false, ...olderThan }];
+    and.push({
+      OR: after.pinned ? [{ pinned: true, ...olderThan }, { pinned: false }] : [{ pinned: false, ...olderThan }],
+    });
   }
+  const where: Prisma.PostWhereInput = { workspaceId: ctx.workspaceId, deletedAt: null, AND: and };
   const rows = await db.post.findMany({
     where,
     orderBy: [{ pinned: "desc" }, { createdAt: "desc" }, { id: "desc" }],
     take: take + 1,
-    include: { author: authorSelect, _count: { select: { comments: true } } },
+    include: { author: authorSelect, category: categorySelect, _count: { select: { comments: true } } },
   });
   const hasMore = rows.length > take;
   const page = rows.slice(0, take);
@@ -106,6 +149,8 @@ export async function listPosts(
     title: p.title,
     excerpt: markdownExcerpt(p.body),
     pinned: p.pinned,
+    isDraft: p.publishedAt === null,
+    category: p.category,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     author: p.author,
@@ -123,8 +168,8 @@ export async function listPosts(
 export async function getPostHeader(ctx: TenantContext, postId: string) {
   const id = parseInput(idSchema, postId);
   const post = await db.post.findFirst({
-    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
-    include: { author: authorSelect },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...visiblePostWhere(ctx) },
+    include: { author: authorSelect, category: categorySelect },
   });
   if (!post) throw notFound("Gönderi bulunamadı.");
   return post;
@@ -134,9 +179,10 @@ export async function getPostHeader(ctx: TenantContext, postId: string) {
 export async function getPost(ctx: TenantContext, postId: string) {
   const id = parseInput(idSchema, postId);
   const post = await db.post.findFirst({
-    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...visiblePostWhere(ctx) },
     include: {
       author: authorSelect,
+      category: categorySelect,
       comments: {
         where: { workspaceId: ctx.workspaceId },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -149,10 +195,24 @@ export async function getPost(ctx: TenantContext, postId: string) {
 }
 
 export async function createPost(ctx: TenantContext, input: unknown) {
-  const data = parseInput(postSchema, input);
+  const { draft, ...data } = parseInput(createPostSchema, input);
+  await assertCategory(ctx, data.categoryId);
   const post = await db.post.create({
-    data: { ...data, workspaceId: ctx.workspaceId, authorId: ctx.userId },
+    data: {
+      ...data,
+      categoryId: data.categoryId ?? null,
+      workspaceId: ctx.workspaceId,
+      authorId: ctx.userId,
+      publishedAt: draft ? null : new Date(),
+    },
   });
+  // A draft announces nothing; that happens once, in publishPost.
+  if (!draft) await announcePost(ctx, post);
+  return post;
+}
+
+/** Subscribe the author, notify members and record the activity row. Runs once per post, at publish time. */
+async function announcePost(ctx: TenantContext, post: { id: string; title: string; body: string }) {
   await autoSubscribe(ctx, { type: "post", id: post.id }, [ctx.userId]);
   await notifyNewPost(ctx, post); // after the main write; never throws
   await recordActivity(ctx, {
@@ -161,7 +221,25 @@ export async function createPost(ctx: TenantContext, input: unknown) {
     path: postActivityPath(post.id),
     subject: { type: "post", id: post.id },
   });
-  return post;
+}
+
+/**
+ * Publishes the caller's own draft: sets publishedAt (and moves createdAt to
+ * now so it sorts as new), then fires the post-created notifications,
+ * activity and subscription exactly once. The conditional update makes a
+ * second call (double click, retry) a CONFLICT instead of a second announcement.
+ */
+export async function publishPost(ctx: TenantContext, postId: string) {
+  const post = await findPostInWorkspace(ctx, postId);
+  if (post.authorId !== ctx.userId) throw forbidden("Taslağı yalnızca yazarı yayınlayabilir.");
+  const now = new Date();
+  const res = await db.post.updateMany({
+    where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null, publishedAt: null },
+    data: { publishedAt: now, createdAt: now, updatedAt: now },
+  });
+  if (res.count === 0) throw conflict("Bu gönderi zaten yayınlanmış.");
+  await announcePost(ctx, post);
+  return { ...post, publishedAt: now, createdAt: now, updatedAt: now };
 }
 
 function clip(text: string, max: number): string {
@@ -202,7 +280,9 @@ async function notifyNewPost(ctx: TenantContext, post: { id: string; title: stri
 
 async function findPostInWorkspace(ctx: TenantContext, postId: string) {
   const id = parseInput(idSchema, postId);
-  const post = await db.post.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  const post = await db.post.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...visiblePostWhere(ctx) },
+  });
   if (!post) throw notFound("Gönderi bulunamadı.");
   return post;
 }
@@ -211,11 +291,14 @@ export async function updatePost(ctx: TenantContext, postId: string, input: unkn
   const data = parseInput(postSchema, input);
   const post = await findPostInWorkspace(ctx, postId);
   if (!canModify(ctx, post.authorId)) throw forbidden("Bu gönderiyi düzenleme yetkiniz yok.");
+  await assertCategory(ctx, data.categoryId);
   const res = await db.post.updateMany({
     where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null },
     data,
   });
   if (res.count === 0) throw notFound("Gönderi bulunamadı.");
+  // Editing a draft notifies nobody; mentions are handled when it is published.
+  if (post.publishedAt === null) return;
   // Only members who were not mentioned before are notified.
   const before = new Set(parseMentionIds(post.body));
   const added = (await resolveMentionedMembers(ctx, data.body)).filter((id) => !before.has(id));

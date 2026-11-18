@@ -15,11 +15,16 @@ export function PostList({
   initialItems,
   initialHasMore,
   initialCursor,
+  categoryId = null,
+  draftsOnly = false,
 }: {
   slug: string;
   initialItems: PostListItem[];
   initialHasMore: boolean;
   initialCursor: string | null;
+  /** The active list filter; load-more keeps it. */
+  categoryId?: string | null;
+  draftsOnly?: boolean;
 }) {
   const [items, setItems] = useState(initialItems);
   const [hasMore, setHasMore] = useState(initialHasMore);
@@ -41,7 +46,7 @@ export function PostList({
     setError(null);
     startTransition(async () => {
       try {
-        const res = await loadMorePostsAction(slug, cursor);
+        const res = await loadMorePostsAction(slug, cursor, { categoryId, draftsOnly });
         setItems((prev) => {
           const known = new Set(prev.map((p) => p.id));
           return [...prev, ...res.items.filter((p) => !known.has(p.id))];

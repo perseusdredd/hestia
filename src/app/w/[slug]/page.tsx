@@ -132,7 +132,7 @@ export default async function WorkspaceOverview({
   const [summary, counts, posts, todos, events, recent, activity] = await Promise.all([
     getWorkspaceSummary(ctx),
     getOverviewCounts(ctx, { today }),
-    listPosts(ctx, { take: 5 }),
+    listPosts(ctx, { take: 5, includeDrafts: false }),
     listMyOpenTodos(ctx, { today, take: 6 }),
     listUpcomingEvents(ctx, { days: UPCOMING_DAYS, take: 6 }),
     listRecentItems(ctx, { take: 6 }),

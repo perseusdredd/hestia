@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import type { TenantContext } from "@/lib/tenant-context";
 import { notFound, parseInput } from "@/server/errors";
+import { visiblePostWhere } from "@/server/post-visibility";
 
 /**
  * Per-item follow ("Aboneler") for posts, to-dos and events.
@@ -31,7 +32,7 @@ async function requireSubject(ctx: TenantContext, input: unknown): Promise<Subsc
   let found: { id: string } | null = null;
   switch (s.type) {
     case "post":
-      found = await db.post.findFirst({ where, select: { id: true } });
+      found = await db.post.findFirst({ where: { ...where, ...visiblePostWhere(ctx) }, select: { id: true } });
       break;
     case "todo":
       found = await db.todoItem.findFirst({

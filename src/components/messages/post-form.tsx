@@ -5,14 +5,20 @@ import { toast } from "sonner";
 
 import { FieldError, FormError } from "@/components/form-error";
 import { MentionEditor, type MentionMember } from "@/components/mention-editor";
+import { NativeSelect } from "@/components/native-select";
 import { SubmitButton } from "@/components/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ActionState } from "@/lib/action-state";
+import type { MessageCategoryDto } from "@/server/message-categories";
 
 type Action = (state: ActionState, formData: FormData) => Promise<ActionState>;
 
-/** Create (no `post`) or edit (with `post`) form for a message board post. */
+/**
+ * Create (no `post`) or edit (with `post`) form for a message board post.
+ * New posts offer "Yayınla" and "Taslak olarak kaydet"; a draft being edited
+ * offers "Kaydet" (stays a draft) and "Yayınla".
+ */
 export function PostForm({
   action,
   post,
@@ -20,14 +26,16 @@ export function PostForm({
   onDone,
   cancel,
   members = [],
+  categories = [],
 }: {
   action: Action;
-  post?: { id: string; title: string; body: string };
+  post?: { id: string; title: string; body: string; categoryId?: string | null; isDraft?: boolean };
   submitLabel: string;
   onDone?: () => void;
   cancel?: React.ReactNode;
   /** Offered when typing "@" in the body. */
   members?: MentionMember[];
+  categories?: MessageCategoryDto[];
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, {});
 
@@ -40,6 +48,8 @@ export function PostForm({
 
   const title = state.values?.title ?? post?.title ?? "";
   const body = state.values?.body ?? post?.body ?? "";
+  const categoryId = state.values?.categoryId ?? post?.categoryId ?? "";
+  const isDraft = Boolean(post?.isDraft);
   const idPrefix = post ? `edit-${post.id}` : "new-post";
 
   return (
@@ -60,6 +70,27 @@ export function PostForm({
         />
         <FieldError errors={state.fieldErrors?.title} />
       </div>
+      {categories.length > 0 ? (
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${idPrefix}-category`}>Kategori</Label>
+          <NativeSelect
+            className="max-w-xs"
+            id={`${idPrefix}-category`}
+            name="categoryId"
+            defaultValue={categoryId}
+            key={`c-${categoryId}`}
+            aria-invalid={Boolean(state.fieldErrors?.categoryId) || undefined}
+          >
+            <option value="">Kategorisiz</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.emoji} {c.name}
+              </option>
+            ))}
+          </NativeSelect>
+          <FieldError errors={state.fieldErrors?.categoryId} />
+        </div>
+      ) : null}
       <div className="grid gap-1.5">
         <Label htmlFor={`${idPrefix}-body`}>Mesaj</Label>
         <MentionEditor
@@ -77,9 +108,26 @@ export function PostForm({
         <FieldError errors={state.fieldErrors?.body} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <SubmitButton pending={pending} pendingText="Kaydediliyor">
-          {submitLabel}
-        </SubmitButton>
+        {post && !isDraft ? (
+          <SubmitButton pending={pending} pendingText="Kaydediliyor">
+            {submitLabel}
+          </SubmitButton>
+        ) : (
+          <>
+            <SubmitButton pending={pending} pendingText="Kaydediliyor" name="intent" value="publish">
+              Yayınla
+            </SubmitButton>
+            <SubmitButton
+              pending={pending}
+              pendingText="Kaydediliyor"
+              name="intent"
+              value={post ? "save" : "draft"}
+              variant="outline"
+            >
+              {post ? "Taslağı kaydet" : "Taslak olarak kaydet"}
+            </SubmitButton>
+          </>
+        )}
         {cancel}
       </div>
     </form>

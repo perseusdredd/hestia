@@ -107,6 +107,7 @@ model Workspace {
   memberships  Membership[]
   invitations  Invitation[]
   posts        Post[]
+  messageCategories MessageCategory[]
   comments     Comment[]
   todoLists    TodoList[]
   todoItems    TodoItem[]
@@ -175,13 +176,33 @@ model Post {
   // Soft delete: set while the row is in the trash (purged after 30 days by the cleanup cron).
   deletedAt   DateTime?
   deletedById String?
+  // Draft: publishedAt is null (visible only to the author). Rows created without it count as published.
+  publishedAt DateTime? @default(now())
+  categoryId  String?
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  category  MessageCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   comments  Comment[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, categoryId])
+}
+
+model MessageCategory {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  emoji       String
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  posts     Post[]
+
+  @@index([workspaceId])
 }
 
 model Comment {

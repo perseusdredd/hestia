@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { buttonVariants } from "@/components/ui/button";
 import { requireWorkspace } from "@/lib/tenant";
 import { listMentionCandidates } from "@/server/comments";
+import { listCategories } from "@/server/message-categories";
 
 import { createPostAction } from "../actions";
 
@@ -15,7 +16,7 @@ export const metadata: Metadata = { title: "Yeni mesaj" };
 export default async function NewPostPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { ctx } = await requireWorkspace(slug);
-  const members = await listMentionCandidates(ctx);
+  const [members, categories] = await Promise.all([listMentionCandidates(ctx), listCategories(ctx)]);
 
   return (
     <div className="space-y-6">
@@ -29,7 +30,7 @@ export default async function NewPostPage({ params }: { params: Promise<{ slug: 
         }
       />
       <div className="max-w-2xl">
-        <PostForm action={createPostAction.bind(null, slug)} submitLabel="Yayınla" members={members} />
+        <PostForm action={createPostAction.bind(null, slug)} submitLabel="Yayınla" members={members} categories={categories} />
       </div>
     </div>
   );

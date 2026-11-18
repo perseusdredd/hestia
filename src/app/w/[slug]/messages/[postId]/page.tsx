@@ -8,6 +8,7 @@ import { SubscribeToggle } from "@/components/subscriptions/subscribe-toggle";
 import { PostControls } from "@/components/messages/post-controls";
 import { Markdown } from "@/components/markdown";
 import { ReactionBar } from "@/components/reactions/reaction-bar";
+import { CategoryBadge } from "@/components/messages/category-badge";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { displayName, UserAvatar } from "@/components/user-avatar";
@@ -16,6 +17,7 @@ import { canModify, hasRole } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { isServiceError } from "@/server/errors";
 import { listMentionCandidates, mentionNames } from "@/server/comments";
+import { listCategories } from "@/server/message-categories";
 import { getPostHeader } from "@/server/messages";
 import { listReactions, REACTION_EMOJIS } from "@/server/reactions";
 import { isSubscribed, countSubscribers } from "@/server/subscriptions";
@@ -40,14 +42,16 @@ export default async function PostPage({
   }
 
   const subject = { type: "post" as const, id: post.id };
-  const [members, names, subscribed, subscribers, reactions] = await Promise.all([
+  const [members, categories, names, subscribed, subscribers, reactions] = await Promise.all([
     listMentionCandidates(ctx),
+    listCategories(ctx),
     mentionNames(ctx, [post.body]),
     isSubscribed(ctx, subject),
     countSubscribers(ctx, subject),
     listReactions(ctx, "post", [post.id]),
   ]);
-  const edited = post.updatedAt.getTime() - post.createdAt.getTime() > 1000;
+  const isDraft = post.publishedAt === null;
+  const edited = !isDraft && post.updatedAt.getTime() - post.createdAt.getTime() > 1000;
 
   return (
     <div className="space-y-8">
@@ -64,6 +68,12 @@ export default async function PostPage({
             <h1 className="min-w-0 flex-1 text-page-title break-words">
               {post.title}
             </h1>
+            {isDraft ? (
+              <Badge variant="outline" className="mt-1 shrink-0">
+                Taslak
+              </Badge>
+            ) : null}
+            {post.category ? <CategoryBadge category={post.category} className="mt-1 shrink-0" /> : null}
             {post.pinned ? (
               <Badge variant="secondary" className="mt-1 shrink-0">
                 <Pin className="size-3" aria-hidden />
@@ -85,10 +95,18 @@ export default async function PostPage({
 
         <PostControls
           slug={slug}
-          post={{ id: post.id, title: post.title, body: post.body, pinned: post.pinned }}
+          post={{
+            id: post.id,
+            title: post.title,
+            body: post.body,
+            pinned: post.pinned,
+            categoryId: post.categoryId,
+            isDraft,
+          }}
           canModify={canModify(ctx, post.authorId)}
           canPin={hasRole(ctx.role, "ADMIN")}
           members={members}
+          categories={categories}
         >
           <Markdown text={post.body} className="text-base" mentions={names} />
         </PostControls>
