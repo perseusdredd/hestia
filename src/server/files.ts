@@ -858,6 +858,26 @@ export async function deleteFile(
 }
 
 /**
+ * Hard-delete a file: remove the row and its stored bytes immediately,
+ * bypassing the trash. For ephemeral attachments (e.g. chat photos) that are
+ * not part of the Files section's soft-delete/restore model, so they must not
+ * linger in the trash after their message is gone.
+ */
+export async function hardDeleteFile(ctx: TenantContext, fileId: string, storage?: StorageDriver) {
+  const id = parseInput(idSchema, fileId);
+  const file = await findFile(db, ctx, id);
+  if (!canModify(ctx, file.uploadedById)) throw forbidden();
+  await db.$transaction(async (tx) => {
+    await forgetActivity(ctx, [{ type: "file", id: file.id }], tx);
+    await tx.file.deleteMany({ where: { id: file.id, workspaceId: ctx.workspaceId } });
+  });
+  if (storage && keyBelongsToWorkspace(file.storageKey, ctx.workspaceId)) {
+    await deleteObjects(storage, [file.storageKey]);
+  }
+  return { folderId: file.folderId };
+}
+
+/**
  * Resolve a TenantContext for a download by file id: null when the file does
  * not exist or `userId` is not a member of its workspace (callers answer 404
  * in both cases so existence is never revealed).

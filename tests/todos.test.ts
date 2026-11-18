@@ -207,7 +207,7 @@ describe("reordering", () => {
     return lists.find((l) => l.id === listId)!.items.map((i) => i.title);
   }
   async function positions(listId: string) {
-    const rows = await db.todoItem.findMany({ where: { listId }, orderBy: { position: "asc" } });
+    const rows = await db.todoItem.findMany({ where: { listId, deletedAt: null }, orderBy: { position: "asc" } });
     return rows.map((r) => r.position);
   }
   async function seed(ctx: TenantContext, titles: string[]) {

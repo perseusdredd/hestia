@@ -15,7 +15,7 @@ import { canModify } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import type { StorageDriver } from "@/lib/storage";
-import { deleteFile } from "@/server/files";
+import { hardDeleteFile } from "@/server/files";
 
 /**
  * Workspace chat ("Sohbet"): one room per workspace.
@@ -454,7 +454,7 @@ export async function deleteMessage(
   // The photo goes with its message (row + stored bytes). Never fails the delete.
   if (msg.fileId) {
     try {
-      await deleteFile(ctx, msg.fileId, storage);
+      await hardDeleteFile(ctx, msg.fileId, storage);
     } catch (e) {
       console.error("[chat] could not delete message photo:", e instanceof Error ? e.message : e);
     }
