@@ -36,6 +36,20 @@ function occurrenceDayKey(startKey: string, recurrence: Recurrence, n: number): 
   return format(addMonths(keyToCalendarDate(startKey), n), "yyyy-MM-dd");
 }
 
+/** A safe (never too high) index to start iterating from for occurrences ending at/after `from`. */
+function firstCandidateIndex(startKey: string, recurrence: Recurrence, from: Date): number {
+  const fromKey = istanbulDayKey(from);
+  if (fromKey <= startKey) return 0;
+  if (recurrence === "MONTHLY") {
+    const months =
+      (Number(fromKey.slice(0, 4)) - Number(startKey.slice(0, 4))) * 12 +
+      (Number(fromKey.slice(5, 7)) - Number(startKey.slice(5, 7)));
+    return Math.max(0, months - 1);
+  }
+  const days = Math.round((istanbulDayStart(fromKey).getTime() - istanbulDayStart(startKey).getTime()) / 86_400_000);
+  return Math.max(0, recurrence === "DAILY" ? days - 1 : Math.floor(days / 7) - 1);
+}
+
 /**
  * Occurrences of `event` whose time span overlaps [rangeStart, rangeEnd], ascending.
  * A non-recurring (or unknown-recurrence) event yields itself when it overlaps.
@@ -52,7 +66,10 @@ export function expandOccurrences(event: RecurringShape, rangeStart: Date, range
   const durationMs = event.endsAt.getTime() - event.startsAt.getTime();
   const untilMs = event.recurrenceUntil?.getTime() ?? Infinity;
   const out: Occurrence[] = [];
-  for (let n = 0; n < MAX_OCCURRENCES; n++) {
+  // Skip straight to the first occurrence that can reach rangeStart (one step of slack),
+  // so long-running series are not cut off by the runaway guard.
+  const first = firstCandidateIndex(startKey, event.recurrence, new Date(rangeStart.getTime() - durationMs));
+  for (let n = first; n < first + MAX_OCCURRENCES; n++) {
     const startMs = istanbulDayStart(occurrenceDayKey(startKey, event.recurrence, n)).getTime() + offsetMs;
     if (startMs > rangeEnd.getTime() || startMs > untilMs) break;
     if (startMs + durationMs >= rangeStart.getTime()) {

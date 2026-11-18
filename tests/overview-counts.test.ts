@@ -57,6 +57,16 @@ describe("getOverviewCounts", () => {
     expect((await getOverviewCounts(ctx, { today })).unreadNotifications).toBe(0);
   });
 
+  it("counts recurring events with an occurrence this week", async () => {
+    const ctx = await fresh();
+    const rec = (title: string, startsAt: string, recurrence: string, extra: object = {}) =>
+      createEvent(ctx, { title, startsAt, endsAt: startsAt.slice(0, 11) + "11:00", recurrence, ...extra });
+    await rec("Haftalık", "2026-10-13T10:00", "WEEKLY"); // Tuesdays
+    await rec("Bitmiş seri", "2026-09-01T10:00", "WEEKLY", { recurrenceUntil: "2026-10-01" });
+    await rec("Eski günlük", "2020-01-01T10:00", "DAILY");
+    expect((await getOverviewCounts(ctx, { today })).eventsThisWeek).toBe(2);
+  });
+
   it("is scoped to ctx's workspace (and user for notifications)", async () => {
     const a = await fresh();
     const b = await fresh();

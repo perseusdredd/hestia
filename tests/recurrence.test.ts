@@ -38,6 +38,21 @@ describe("expandOccurrences", () => {
     expect(occ[1].endsAt.getTime() - occ[1].startsAt.getTime()).toBe(3600_000);
   });
 
+  it("still expands long-running series far past MAX_OCCURRENCES", () => {
+    const daily = { ...weekly, startsAt: at("2020-01-01T10:00"), endsAt: at("2020-01-01T11:00"), recurrence: "DAILY" };
+    const occ = expandOccurrences(daily, at("2026-03-05T00:00"), at("2026-03-07T23:59"));
+    expect(occ.map((o) => o.startsAt.toISOString())).toEqual([
+      "2026-03-05T07:00:00.000Z",
+      "2026-03-06T07:00:00.000Z",
+      "2026-03-07T07:00:00.000Z",
+    ]);
+    expect(occ[0].index).toBeGreaterThan(2000);
+    const old = { ...weekly, startsAt: at("1990-01-01T10:00"), endsAt: at("1990-01-01T11:00") };
+    expect(expandOccurrences(old, at("2026-03-01T00:00"), at("2026-03-31T23:59")).length).toBeGreaterThan(3);
+    const monthly = { ...daily, recurrence: "MONTHLY", startsAt: at("2000-01-31T10:00"), endsAt: at("2000-01-31T11:00") };
+    expect(expandOccurrences(monthly, at("2026-02-01T00:00"), at("2026-02-28T23:59"))).toHaveLength(1);
+  });
+
   it("expands daily and monthly (clamping the 31st)", () => {
     const daily = { ...weekly, recurrence: "DAILY" };
     expect(expandOccurrences(daily, at("2026-03-05T00:00"), at("2026-03-09T23:59"))).toHaveLength(5);

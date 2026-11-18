@@ -3,6 +3,7 @@ import { z } from "zod";
 import { dateOnlyToDb, isDateOnly, todayDateOnly } from "@/lib/date-only";
 import { db } from "@/lib/db";
 import { addDaysToKey, istanbulDayEnd, istanbulDayStart } from "@/lib/istanbul-time";
+import { expandOccurrences } from "@/lib/recurrence";
 import type { TenantContext } from "@/lib/tenant-context";
 import { parseInput } from "@/server/errors";
 
@@ -44,18 +45,35 @@ export async function getOverviewCounts(
   const week = istanbulWeek(today);
   const open = { workspaceId: ctx.workspaceId, status: "OPEN" as const, deletedAt: null };
 
-  const [openTodos, overdueTodos, eventsThisWeek, unreadNotifications] = await Promise.all([
+  const weekStart = istanbulDayStart(week.first);
+  const weekEnd = istanbulDayEnd(week.last);
+
+  const [openTodos, overdueTodos, plainEvents, recurringEvents, unreadNotifications] = await Promise.all([
     db.todoItem.count({ where: open }),
     db.todoItem.count({ where: { ...open, dueDate: { lt: dateOnlyToDb(today) } } }),
     db.event.count({
       where: {
         workspaceId: ctx.workspaceId,
         deletedAt: null,
-        startsAt: { lte: istanbulDayEnd(week.last) },
-        endsAt: { gte: istanbulDayStart(week.first) },
+        recurrence: "NONE",
+        startsAt: { lte: weekEnd },
+        endsAt: { gte: weekStart },
       },
+    }),
+    // Recurring events count when any occurrence falls in the week (same rule as the calendar).
+    db.event.findMany({
+      where: {
+        workspaceId: ctx.workspaceId,
+        deletedAt: null,
+        recurrence: { not: "NONE" },
+        startsAt: { lte: weekEnd },
+        OR: [{ recurrenceUntil: null }, { recurrenceUntil: { gte: weekStart } }],
+      },
+      select: { startsAt: true, endsAt: true, recurrence: true, recurrenceUntil: true },
     }),
     db.notification.count({ where: { workspaceId: ctx.workspaceId, userId: ctx.userId, readAt: null } }),
   ]);
+  const eventsThisWeek =
+    plainEvents + recurringEvents.filter((e) => expandOccurrences(e, weekStart, weekEnd).length > 0).length;
   return { openTodos, overdueTodos, eventsThisWeek, unreadNotifications };
 }
