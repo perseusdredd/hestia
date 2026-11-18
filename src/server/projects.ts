@@ -2,7 +2,7 @@ import type { Prisma, Project } from "@prisma/client";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { canModify, hasRole } from "@/lib/roles";
+import { canModify, clientVisibleWhere, hasRole } from "@/lib/roles";
 import { slugify } from "@/lib/slug";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
@@ -223,21 +223,21 @@ export async function setItemProject(
       return;
     }
     case "todoList": {
-      const row = await db.todoList.findFirst({ where: base });
+      const row = await db.todoList.findFirst({ where: { ...base, ...clientVisibleWhere(ctx) } });
       if (!row) throw notFound("Liste bulunamadı.");
       if (!canModify(ctx, row.createdById)) throw forbidden();
       await db.todoList.updateMany({ where: base, data: { projectId: target } });
       return;
     }
     case "event": {
-      const row = await db.event.findFirst({ where: base });
+      const row = await db.event.findFirst({ where: { ...base, ...clientVisibleWhere(ctx) } });
       if (!row) throw notFound("Etkinlik bulunamadı.");
       if (!canModify(ctx, row.createdById)) throw forbidden();
       await db.event.updateMany({ where: base, data: { projectId: target } });
       return;
     }
     case "folder": {
-      const row = await db.folder.findFirst({ where: base });
+      const row = await db.folder.findFirst({ where: { ...base, ...clientVisibleWhere(ctx) } });
       if (!row) throw notFound("Klasör bulunamadı.");
       if (!canModify(ctx, row.createdById)) throw forbidden();
       if (row.parentId) {
@@ -272,7 +272,7 @@ export type ProjectOverview = {
  */
 export async function getProjectOverview(ctx: TenantContext, slug: string): Promise<ProjectOverview> {
   const project = await getProject(ctx, slug);
-  const scope = { workspaceId: ctx.workspaceId, projectId: project.id, deletedAt: null };
+  const scope = { workspaceId: ctx.workspaceId, projectId: project.id, deletedAt: null, ...clientVisibleWhere(ctx) };
   const postWhere: Prisma.PostWhereInput = { ...scope, ...visiblePostWhere(ctx) };
   const folderWhere = { ...scope, parentId: null };
   const [posts, lists, folders, events, postCount, listCount, folderCount, eventCount] = await Promise.all([

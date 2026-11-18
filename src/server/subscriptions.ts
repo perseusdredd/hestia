@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import type { TenantContext } from "@/lib/tenant-context";
 import { notFound, parseInput } from "@/server/errors";
+import { clientVisibleWhere } from "@/lib/roles";
 import { visiblePostWhere } from "@/server/post-visibility";
 
 /**
@@ -36,12 +37,12 @@ async function requireSubject(ctx: TenantContext, input: unknown): Promise<Subsc
       break;
     case "todo":
       found = await db.todoItem.findFirst({
-        where: { ...where, list: { workspaceId: ctx.workspaceId, deletedAt: null } },
+        where: { ...where, list: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) } },
         select: { id: true },
       });
       break;
     case "event":
-      found = await db.event.findFirst({ where, select: { id: true } });
+      found = await db.event.findFirst({ where: { ...where, ...clientVisibleWhere(ctx) }, select: { id: true } });
       break;
   }
   if (!found) throw notFound("Kayıt bulunamadı.");
@@ -174,10 +175,17 @@ export async function listMySubscriptions(ctx: TenantContext, opts: { take?: num
       select: { id: true, title: true },
     }),
     db.todoItem.findMany({
-      where: { ...base, id: { in: idsOf("todo") }, list: { workspaceId: ctx.workspaceId, deletedAt: null } },
+      where: {
+        ...base,
+        id: { in: idsOf("todo") },
+        list: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
+      },
       select: { id: true, title: true },
     }),
-    db.event.findMany({ where: { ...base, id: { in: idsOf("event") } }, select: { id: true, title: true } }),
+    db.event.findMany({
+      where: { ...base, id: { in: idsOf("event") }, ...clientVisibleWhere(ctx) },
+      select: { id: true, title: true },
+    }),
   ]);
   const titles: Record<SubscriptionSubjectType, Map<string, string>> = {
     post: new Map(posts.map((p) => [p.id, p.title])),

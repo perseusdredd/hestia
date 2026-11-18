@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { formString, toActionState, type ActionState } from "@/lib/action-state";
+import { formFlag, formString, toActionState, type ActionState } from "@/lib/action-state";
 import { requireWorkspace } from "@/lib/tenant";
 import {
   createPost,
@@ -21,7 +21,13 @@ function postValues(formData: FormData) {
     title: formString(formData, "title"),
     body: formString(formData, "body"),
     categoryId: formString(formData, "categoryId"),
+    internal: formFlag(formData, "internal") ? "on" : "",
   };
+}
+
+/** Form strings -> service input (the checkbox becomes a boolean). */
+function serviceInput(values: Record<string, string>) {
+  return { ...values, internal: values.internal === "on" };
 }
 
 function revalidate(slug: string) {
@@ -38,7 +44,7 @@ export async function createPostAction(
   let postId: string;
   try {
     const { ctx } = await requireWorkspace(slug);
-    postId = (await createPost(ctx, { ...values, draft })).id;
+    postId = (await createPost(ctx, { ...serviceInput(values), draft })).id;
     revalidate(slug);
   } catch (e) {
     return { ...toActionState(e), values };
@@ -55,7 +61,7 @@ export async function updatePostAction(
   try {
     const { ctx } = await requireWorkspace(slug);
     const id = formString(formData, "id");
-    await updatePost(ctx, id, values);
+    await updatePost(ctx, id, serviceInput(values));
     if (formString(formData, "intent") === "publish") {
       await publishPost(ctx, id);
       revalidate(slug);

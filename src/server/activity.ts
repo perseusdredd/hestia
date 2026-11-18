@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { istanbulDayKey } from "@/lib/istanbul-time";
-import { ROLE_LABELS, type Role } from "@/lib/roles";
+import { isGuest, ROLE_LABELS, type Role } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { parseInput, ServiceError } from "@/server/errors";
 import { isValidNotificationPath } from "@/server/notifications";
@@ -20,7 +20,10 @@ import { isValidNotificationPath } from "@/server/notifications";
  * after the membership is gone (see recordMembershipRemoved).
  *
  * Reading: listActivity() is scoped by ctx.workspaceId; every member sees the
- * whole workspace feed.
+ * whole workspace feed. A GUEST only gets rows whose subject is not internal
+ * ("Yalnızca ekip") and none of the member rows. Activity.internal is derived
+ * from the subject when the row is written (see subjectInternal) and kept in
+ * sync when the flag changes (see syncActivityInternal).
  */
 
 export const ACTIVITY_TYPES = [
@@ -108,6 +111,134 @@ function logFailure(where: string, e: unknown) {
   console.error(`[activity] ${where} failed:`, e);
 }
 
+type CommentParentRow = {
+  postId: string | null;
+  todoItemId: string | null;
+  documentId: string | null;
+  eventId: string | null;
+};
+
+/** True when a document is hidden from guests: its own flag or its folder's. */
+function documentIsInternal(d: { internal: boolean; folder: { internal: boolean } | null }): boolean {
+  return d.internal || (d.folder?.internal ?? false);
+}
+
+/**
+ * Whether content is team-only ("Yalnızca ekip"), looked up from the DB:
+ * a to-do item follows its list, a file its folder (chat photos are always
+ * team-only), a document its own flag or its folder's, a comment its parent.
+ * Missing rows count as not internal.
+ */
+export async function subjectInternal(workspaceId: string, subject: ActivitySubject): Promise<boolean> {
+  const where = { id: subject.id, workspaceId };
+  switch (subject.type) {
+    case "post":
+      return (await db.post.findFirst({ where, select: { internal: true } }))?.internal ?? false;
+    case "todoList":
+      return (await db.todoList.findFirst({ where, select: { internal: true } }))?.internal ?? false;
+    case "todoItem":
+      return (await db.todoItem.findFirst({ where, select: { list: { select: { internal: true } } } }))?.list.internal ?? false;
+    case "event":
+      return (await db.event.findFirst({ where, select: { internal: true } }))?.internal ?? false;
+    case "folder":
+      return (await db.folder.findFirst({ where, select: { internal: true } }))?.internal ?? false;
+    case "file": {
+      const f = await db.file.findFirst({ where, select: { fromChat: true, folder: { select: { internal: true } } } });
+      return f ? f.fromChat || (f.folder?.internal ?? false) : false;
+    }
+    case "document": {
+      const d = await db.document.findFirst({ where, select: { internal: true, folder: { select: { internal: true } } } });
+      return d ? documentIsInternal(d) : false;
+    }
+    case "comment": {
+      const c: CommentParentRow | null = await db.comment.findFirst({
+        where,
+        select: { postId: true, todoItemId: true, documentId: true, eventId: true },
+      });
+      if (!c) return false;
+      if (c.postId) return subjectInternal(workspaceId, { type: "post", id: c.postId });
+      if (c.todoItemId) return subjectInternal(workspaceId, { type: "todoItem", id: c.todoItemId });
+      if (c.documentId) return subjectInternal(workspaceId, { type: "document", id: c.documentId });
+      if (c.eventId) return subjectInternal(workspaceId, { type: "event", id: c.eventId });
+      return false;
+    }
+  }
+}
+
+async function markSubjects(workspaceId: string, type: ActivitySubjectType, ids: string[], internal: boolean) {
+  if (ids.length === 0) return;
+  await db.activity.updateMany({ where: { workspaceId, subjectType: type, subjectId: { in: ids } }, data: { internal } });
+}
+
+/**
+ * Re-derive Activity.internal for `subject` and everything that inherits from
+ * it, after its team-only flag changed or it moved into / out of a folder.
+ * Never throws.
+ */
+export async function syncActivityInternal(ctx: Pick<TenantContext, "workspaceId">, subject: ActivitySubject): Promise<void> {
+  try {
+    const workspaceId = ctx.workspaceId;
+    const { id } = subject;
+    const commentsOf = async (key: keyof CommentParentRow, ids: string[], internal: boolean) => {
+      if (ids.length === 0) return;
+      const rows = await db.comment.findMany({ where: { workspaceId, [key]: { in: ids } }, select: { id: true } });
+      await markSubjects(workspaceId, "comment", rows.map((r) => r.id), internal);
+    };
+    switch (subject.type) {
+      case "post":
+      case "event":
+      case "document": {
+        const internal = await subjectInternal(workspaceId, subject);
+        await markSubjects(workspaceId, subject.type, [id], internal);
+        await commentsOf(subject.type === "post" ? "postId" : subject.type === "event" ? "eventId" : "documentId", [id], internal);
+        return;
+      }
+      case "todoList": {
+        const internal = await subjectInternal(workspaceId, subject);
+        await markSubjects(workspaceId, "todoList", [id], internal);
+        const items = await db.todoItem.findMany({ where: { workspaceId, listId: id }, select: { id: true } });
+        const itemIds = items.map((i) => i.id);
+        await markSubjects(workspaceId, "todoItem", itemIds, internal);
+        await commentsOf("todoItemId", itemIds, internal);
+        return;
+      }
+      case "todoItem":
+      case "file":
+      case "comment": {
+        await markSubjects(workspaceId, subject.type, [id], await subjectInternal(workspaceId, subject));
+        return;
+      }
+      case "folder": {
+        // The folder and its whole subtree: folders, their files and documents, and document comments.
+        const folderIds = [id];
+        for (let i = 0; i < folderIds.length && folderIds.length < 5000; i++) {
+          const kids = await db.folder.findMany({ where: { workspaceId, parentId: folderIds[i] }, select: { id: true } });
+          for (const k of kids) if (!folderIds.includes(k.id)) folderIds.push(k.id);
+        }
+        const folders = await db.folder.findMany({ where: { workspaceId, id: { in: folderIds } }, select: { id: true, internal: true } });
+        await markSubjects(workspaceId, "folder", folders.filter((f) => f.internal).map((f) => f.id), true);
+        await markSubjects(workspaceId, "folder", folders.filter((f) => !f.internal).map((f) => f.id), false);
+        const internalFolders = new Set(folders.filter((f) => f.internal).map((f) => f.id));
+        const files = await db.file.findMany({ where: { workspaceId, folderId: { in: folderIds } }, select: { id: true, folderId: true, fromChat: true } });
+        const fileInternal = (f: (typeof files)[number]) => f.fromChat || (f.folderId !== null && internalFolders.has(f.folderId));
+        await markSubjects(workspaceId, "file", files.filter(fileInternal).map((f) => f.id), true);
+        await markSubjects(workspaceId, "file", files.filter((f) => !fileInternal(f)).map((f) => f.id), false);
+        const docs = await db.document.findMany({ where: { workspaceId, folderId: { in: folderIds } }, select: { id: true, folderId: true, internal: true } });
+        const docInternal = (d: (typeof docs)[number]) => d.internal || (d.folderId !== null && internalFolders.has(d.folderId));
+        const yes = docs.filter(docInternal).map((d) => d.id);
+        const no = docs.filter((d) => !docInternal(d)).map((d) => d.id);
+        await markSubjects(workspaceId, "document", yes, true);
+        await markSubjects(workspaceId, "document", no, false);
+        await commentsOf("documentId", yes, true);
+        await commentsOf("documentId", no, false);
+        return;
+      }
+    }
+  } catch (e) {
+    logFailure("syncActivityInternal", e);
+  }
+}
+
 async function insert(
   ctx: TenantContext,
   input: RecordActivityInput,
@@ -130,6 +261,7 @@ async function insert(
       path: data.path,
       subjectType: data.subject?.type ?? null,
       subjectId: data.subject?.id ?? null,
+      internal: data.subject ? await subjectInternal(ctx.workspaceId, data.subject) : false,
     },
   });
   return true;
@@ -383,6 +515,8 @@ export async function listActivity(
   const after = opts.cursor ? decodeCursor(opts.cursor) : null;
   const where: Prisma.ActivityWhereInput = {
     workspaceId: ctx.workspaceId,
+    // A guest never sees team-only content or what happens to the team's membership.
+    ...(isGuest(ctx.role) ? { internal: false, NOT: { type: { in: [...ACTIVITY_GROUPS.members] } } } : {}),
     ...(opts.types && opts.types.length ? { type: { in: opts.types } } : {}),
     ...(opts.actorId ? { actorId: opts.actorId } : {}),
     ...(after

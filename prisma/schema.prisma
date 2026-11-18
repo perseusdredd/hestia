@@ -104,6 +104,8 @@ enum Role {
   OWNER
   ADMIN
   MEMBER
+  // Client / guest: sees only items that are not marked internal ("Yalnızca ekip").
+  GUEST
 }
 
 model Workspace {
@@ -202,6 +204,8 @@ model Post {
   categoryId  String?
   // Optional project (null = "Genel", workspace-level).
   projectId   String?
+  // Team-only: hidden from GUEST members. false = visible to everyone (the default for all existing rows).
+  internal    Boolean  @default(false)
 
   workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -281,6 +285,8 @@ model TodoList {
   deletedById String?
   // Optional project (null = "Genel", workspace-level).
   projectId   String?
+  // Team-only: hidden from GUEST members. false = visible to everyone (the default for all existing rows).
+  internal    Boolean  @default(false)
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -391,6 +397,8 @@ model Folder {
   deletedById String?
   // Optional project (null = "Genel", workspace-level).
   projectId   String?
+  // Team-only: hidden from GUEST members. false = visible to everyone (the default for all existing rows).
+  internal    Boolean  @default(false)
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -443,6 +451,8 @@ model Document {
   // Soft delete: set while the row is in the trash (purged after 30 days by the cleanup cron).
   deletedAt   DateTime?
   deletedById String?
+  // Team-only: hidden from GUEST members. false = visible to everyone (the default for all existing rows).
+  internal    Boolean  @default(false)
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   folder    Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
@@ -476,6 +486,8 @@ model Event {
   recurrenceUntil DateTime?
   // Optional project (null = "Genel", workspace-level).
   projectId   String?
+  // Team-only: hidden from GUEST members. false = visible to everyone (the default for all existing rows).
+  internal    Boolean  @default(false)
 
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -658,6 +670,8 @@ model Activity {
   // What the row is about, e.g. ("post", <id>), so rows can be removed when the subject is deleted.
   subjectType String?
   subjectId   String?
+  // Team-only: hidden from GUEST members. false = visible to everyone (the default for all existing rows).
+  internal    Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

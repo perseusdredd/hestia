@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import type { TenantContext } from "@/lib/tenant-context";
+import { clientVisibleWhere } from "@/lib/roles";
+import { assertNotGuest } from "@/server/client-visibility";
 import { recordActivity } from "@/server/activity";
 import { notFound, parseInput } from "@/server/errors";
 
@@ -48,9 +50,10 @@ export async function setHillPosition(
   position: unknown,
   note?: unknown,
 ) {
+  assertNotGuest(ctx, "Misafirler ilerleme grafiğini güncelleyemez.");
   const data = parseInput(hillSchema, { position, note: note ?? null });
   const list = await db.todoList.findFirst({
-    where: { id: listId, workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { id: listId, workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
     select: { id: true, name: true },
   });
   if (!list) throw notFound("Liste bulunamadı.");
@@ -81,7 +84,7 @@ export async function setHillPosition(
 
 export async function getHillHistory(ctx: TenantContext, listId: string): Promise<HillSnapshotDTO[]> {
   const list = await db.todoList.findFirst({
-    where: { id: listId, workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { id: listId, workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
     select: { id: true },
   });
   if (!list) throw notFound("Liste bulunamadı.");

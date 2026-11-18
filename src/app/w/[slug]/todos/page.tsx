@@ -8,6 +8,7 @@ import { todayDateOnly } from "@/lib/date-only";
 import { NewListButton } from "@/components/todos/list-dialogs";
 import { TodoListCard } from "@/components/todos/todo-list-card";
 import { buttonVariants } from "@/components/ui/button";
+import { isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { countComments } from "@/server/comments";
 import { listProjectOptions } from "@/server/projects";
@@ -48,7 +49,7 @@ export default async function TodosPage({
       <PageHeader
         title="Yapılacaklar"
         description="Görev listeleri, atamalar ve bitiş tarihleri."
-        actions={<NewListButton slug={slug} projects={projects} />}
+        actions={<NewListButton slug={slug} projects={projects} canSetInternal={!isGuest(ctx.role)} />}
       />
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Görev filtresi">
@@ -80,7 +81,7 @@ export default async function TodosPage({
             icon={ListChecks}
             title="Henüz liste yok"
             description="İlk görev listenizi oluşturun, ardından görevleri ekleyip ekip üyelerine atayın."
-            action={<NewListButton slug={slug} />}
+            action={<NewListButton slug={slug} canSetInternal={!isGuest(ctx.role)} />}
           />
         )
       ) : (
@@ -98,6 +99,7 @@ export default async function TodosPage({
               today={today}
               readOnlyAdd={assignedToMe}
               commentCounts={commentCounts}
+              canSetInternal={!isGuest(ctx.role)}
             />
           ))}
         </div>

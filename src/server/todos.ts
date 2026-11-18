@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import { dateOnlyToDb, dbToDateOnly, isDateOnly } from "@/lib/date-only";
 import { db } from "@/lib/db";
-import { canModify } from "@/lib/roles";
+import { canModify, clientVisibleWhere, isGuest } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
-import { forgetActivity, recordActivity, recordTodoToggled } from "@/server/activity";
+import { forgetActivity, recordActivity, recordTodoToggled, syncActivityInternal } from "@/server/activity";
+import { resolveInternal, resolveInternalUpdate, todoItemClientWhere } from "@/server/client-visibility";
 import { conflict, forbidden, notFound, ServiceError, parseInput } from "@/server/errors";
 import { notifyTodoAssigned } from "@/server/notifications";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
@@ -58,10 +59,13 @@ const createListSchema = z.object({
   description: listDescriptionSchema.optional(),
   /** Optional project; empty / omitted = "Genel". */
   projectId: projectIdField,
+  /** "Yalnızca ekip": hidden from guests (ignored when a guest creates the list). */
+  internal: z.boolean().optional(),
 });
 const updateListSchema = z.object({
   name: listNameSchema.optional(),
   description: listDescriptionSchema.optional(),
+  internal: z.boolean().optional(),
 });
 // yyyy-MM-dd strings compare correctly as plain strings, so a start date must
 // not fall after the due date.
@@ -122,6 +126,7 @@ export type TodoListDTO = {
   description: string | null;
   createdById: string;
   canEdit: boolean;
+  internal: boolean;
   hillPosition: number;
   hillNote: string | null;
   total: number;
@@ -227,9 +232,12 @@ export async function listTodoLists(
   const order = [{ position: "asc" as const }, { createdAt: "asc" as const }, { id: "asc" as const }];
   const include = { assignee: { select: userSelect }, ...extraAssigneesInclude } as const;
   const [lists, openItems, doneIds, counts, sections] = await Promise.all([
-    db.todoList.findMany({ where: { workspaceId: ctx.workspaceId, deletedAt: null }, orderBy: order }),
+    db.todoList.findMany({
+      where: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
+      orderBy: order,
+    }),
     db.todoItem.findMany({
-      where: { workspaceId: ctx.workspaceId, status: "OPEN", deletedAt: null },
+      where: { workspaceId: ctx.workspaceId, status: "OPEN", deletedAt: null, ...todoItemClientWhere(ctx) },
       orderBy: order,
       include,
     }),
@@ -238,15 +246,17 @@ export async function listTodoLists(
         SELECT id, ROW_NUMBER() OVER (PARTITION BY "listId" ORDER BY position, "createdAt", id) AS rn
         FROM "TodoItem"
         WHERE "workspaceId" = ${ctx.workspaceId} AND status = 'DONE' AND "deletedAt" IS NULL
+          AND (${!isGuest(ctx.role)}::boolean OR "listId" IN (
+            SELECT id FROM "TodoList" WHERE "workspaceId" = ${ctx.workspaceId} AND internal = false))
       ) ranked
       WHERE rn <= ${DONE_ITEMS_PER_LIST}`,
     db.todoItem.groupBy({
       by: ["listId", "status"],
-      where: { workspaceId: ctx.workspaceId, deletedAt: null },
+      where: { workspaceId: ctx.workspaceId, deletedAt: null, ...todoItemClientWhere(ctx) },
       _count: { _all: true },
     }),
     db.todoSection.findMany({
-      where: { workspaceId: ctx.workspaceId, list: { deletedAt: null } },
+      where: { workspaceId: ctx.workspaceId, list: { deletedAt: null, ...clientVisibleWhere(ctx) } },
       orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     }),
   ]);
@@ -258,7 +268,7 @@ export async function listTodoLists(
   }
   const doneItems = doneIds.length
     ? await db.todoItem.findMany({
-        where: { workspaceId: ctx.workspaceId, id: { in: doneIds.map((r) => r.id) } },
+        where: { workspaceId: ctx.workspaceId, id: { in: doneIds.map((r) => r.id) }, ...todoItemClientWhere(ctx) },
         orderBy: order,
         include,
       })
@@ -291,6 +301,7 @@ export async function listTodoLists(
       description: l.description,
       createdById: l.createdById,
       canEdit: canModify(ctx, l.createdById),
+      internal: l.internal,
       hillPosition: l.hillPosition,
       hillNote: l.hillNote,
       total,
@@ -321,6 +332,7 @@ export async function listMyOpenTodos(
     OR: [{ assigneeId: ctx.userId }, { extraAssignees: { some: { userId: ctx.userId } } }],
     status: "OPEN" as const,
     deletedAt: null,
+    ...todoItemClientWhere(ctx),
   };
   const [rows, total] = await Promise.all([
     db.todoItem.findMany({
@@ -364,6 +376,7 @@ export async function createTodoList(ctx: TenantContext, input: unknown) {
         name: data.name,
         description: data.description ?? null,
         projectId,
+        internal: resolveInternal(ctx, data.internal),
         position: (max._max.position ?? -1) + 1,
       },
     });
@@ -378,7 +391,9 @@ export async function createTodoList(ctx: TenantContext, input: unknown) {
 }
 
 async function getList(ctx: TenantContext, id: string) {
-  const list = await db.todoList.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  const list = await db.todoList.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
+  });
   if (!list) throw notFound("Liste bulunamadı.");
   return list;
 }
@@ -387,14 +402,19 @@ export async function updateTodoList(ctx: TenantContext, id: string, input: unkn
   const data = parseInput(updateListSchema, input);
   const list = await getList(ctx, id);
   if (!canModify(ctx, list.createdById)) throw forbidden();
+  const internal = resolveInternalUpdate(ctx, data.internal);
   const res = await db.todoList.updateMany({
     where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
     data: {
       ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.description !== undefined ? { description: data.description } : {}),
+      ...(internal !== undefined ? { internal } : {}),
     },
   });
   if (res.count === 0) throw notFound("Liste bulunamadı.");
+  if (internal !== undefined && internal !== list.internal) {
+    await syncActivityInternal(ctx, { type: "todoList", id: list.id });
+  }
 }
 
 /**
@@ -421,7 +441,7 @@ export async function deleteTodoList(ctx: TenantContext, id: string) {
 
 export async function createTodoItem(ctx: TenantContext, listId: string, input: unknown) {
   const data = parseInput(createItemSchema, input);
-  await getList(ctx, listId); // parent must belong to this workspace
+  const parentList = await getList(ctx, listId); // parent must belong to this workspace
   await requireAssignee(ctx, data.assigneeId);
   const extras = cleanExtras(data.extraAssigneeIds ?? [], data.assigneeId);
   await requireExtraAssignees(ctx, extras);
@@ -458,10 +478,20 @@ export async function createTodoItem(ctx: TenantContext, listId: string, input: 
     ...extras,
   ]);
   for (const userId of extras) {
-    await notifyTodoAssigned(ctx, { id: item.id, title: item.title, assigneeId: userId });
+    await notifyTodoAssigned(ctx, {
+      id: item.id,
+      title: item.title,
+      assigneeId: userId,
+      internal: parentList.internal,
+    });
   }
   if (item.assigneeId) {
-    await notifyTodoAssigned(ctx, { id: item.id, title: item.title, assigneeId: item.assigneeId });
+    await notifyTodoAssigned(ctx, {
+      id: item.id,
+      title: item.title,
+      assigneeId: item.assigneeId,
+      internal: parentList.internal,
+    });
   }
   await recordActivity(ctx, {
     type: "TODO_CREATED",
@@ -479,7 +509,12 @@ const itemIdSchema = z.string().min(1).max(64);
 export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
   const id = parseInput(itemIdSchema, itemId);
   const item = await db.todoItem.findFirst({
-    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, list: { workspaceId: ctx.workspaceId, deletedAt: null } },
+    where: {
+      id,
+      workspaceId: ctx.workspaceId,
+      deletedAt: null,
+      list: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
+    },
     select: {
       id: true,
       title: true,
@@ -492,7 +527,7 @@ export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
       completedAt: true,
       createdAt: true,
       createdById: true,
-      list: { select: { id: true, name: true } },
+      list: { select: { id: true, name: true, internal: true } },
       createdBy: personSelect,
       assignee: personSelect,
       extraAssignees: { orderBy: { createdAt: "asc" }, select: { user: personSelect } },
@@ -512,7 +547,8 @@ export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
 
 async function getItem(ctx: TenantContext, id: string) {
   const item = await db.todoItem.findFirst({
-    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, list: { deletedAt: null } },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, list: { deletedAt: null, ...clientVisibleWhere(ctx) } },
+    include: { list: { select: { internal: true } } },
   });
   if (!item) throw notFound("Görev bulunamadı.");
   return item;
@@ -562,7 +598,12 @@ export async function updateTodoItem(ctx: TenantContext, id: string, input: unkn
     ]);
     for (const userId of extras.filter((u) => !previousExtras.includes(u))) {
       await autoSubscribe(ctx, { type: "todo", id: item.id }, [userId]);
-      await notifyTodoAssigned(ctx, { id: item.id, title: data.title ?? item.title, assigneeId: userId });
+      await notifyTodoAssigned(ctx, {
+        id: item.id,
+        title: data.title ?? item.title,
+        assigneeId: userId,
+        internal: item.list.internal,
+      });
     }
   } else if (data.assigneeId) {
     // A new primary assignee must not also stay an extra one.
@@ -577,6 +618,7 @@ export async function updateTodoItem(ctx: TenantContext, id: string, input: unkn
       id: item.id,
       title: data.title ?? item.title,
       assigneeId: data.assigneeId,
+      internal: item.list.internal,
     });
   }
 }
@@ -584,7 +626,7 @@ export async function updateTodoItem(ctx: TenantContext, id: string, input: unkn
 /** Any member may mark an item done / open. */
 export async function setTodoItemDone(ctx: TenantContext, id: string, done: boolean) {
   const res = await db.todoItem.updateMany({
-    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, list: { deletedAt: null } },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, list: { deletedAt: null, ...clientVisibleWhere(ctx) } },
     data: done ? { status: "DONE", completedAt: new Date() } : { status: "OPEN", completedAt: null },
   });
   if (res.count === 0) throw notFound("Görev bulunamadı.");
@@ -756,7 +798,7 @@ export async function moveTodoList(ctx: TenantContext, id: string, direction: un
 /** id + name of every list in the workspace (move targets), in display order. */
 export async function listTodoListOptions(ctx: TenantContext): Promise<{ id: string; name: string }[]> {
   return db.todoList.findMany({
-    where: { workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     select: { id: true, name: true },
   });
@@ -776,7 +818,7 @@ async function lockSections(tx: Tx, ctx: TenantContext, listId: string) {
 async function getSection(ctx: TenantContext, id: string) {
   const parsed = parseInput(sectionRefSchema, id);
   const section = await db.todoSection.findFirst({
-    where: { id: parsed, workspaceId: ctx.workspaceId, list: { deletedAt: null } },
+    where: { id: parsed, workspaceId: ctx.workspaceId, list: { deletedAt: null, ...clientVisibleWhere(ctx) } },
     include: { list: { select: { createdById: true } } },
   });
   if (!section) throw notFound("Bölüm bulunamadı.");

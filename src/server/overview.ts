@@ -4,7 +4,9 @@ import { dateOnlyToDb, isDateOnly, todayDateOnly } from "@/lib/date-only";
 import { db } from "@/lib/db";
 import { addDaysToKey, istanbulDayEnd, istanbulDayStart } from "@/lib/istanbul-time";
 import { expandOccurrences } from "@/lib/recurrence";
+import { clientVisibleWhere } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
+import { todoItemClientWhere } from "@/server/client-visibility";
 import { parseInput } from "@/server/errors";
 
 /**
@@ -43,7 +45,13 @@ export async function getOverviewCounts(
   const opts = parseInput(optsSchema, input);
   const today = opts.today ?? todayDateOnly();
   const week = istanbulWeek(today);
-  const open = { workspaceId: ctx.workspaceId, status: "OPEN" as const, deletedAt: null };
+  const open = {
+    workspaceId: ctx.workspaceId,
+    status: "OPEN" as const,
+    deletedAt: null,
+    ...todoItemClientWhere(ctx),
+  };
+  const visibleEvents = { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) };
 
   const weekStart = istanbulDayStart(week.first);
   const weekEnd = istanbulDayEnd(week.last);
@@ -53,8 +61,7 @@ export async function getOverviewCounts(
     db.todoItem.count({ where: { ...open, dueDate: { lt: dateOnlyToDb(today) } } }),
     db.event.count({
       where: {
-        workspaceId: ctx.workspaceId,
-        deletedAt: null,
+        ...visibleEvents,
         recurrence: "NONE",
         startsAt: { lte: weekEnd },
         endsAt: { gte: weekStart },
@@ -63,8 +70,7 @@ export async function getOverviewCounts(
     // Recurring events count when any occurrence falls in the week (same rule as the calendar).
     db.event.findMany({
       where: {
-        workspaceId: ctx.workspaceId,
-        deletedAt: null,
+        ...visibleEvents,
         recurrence: { not: "NONE" },
         startsAt: { lte: weekEnd },
         OR: [{ recurrenceUntil: null }, { recurrenceUntil: { gte: weekStart } }],

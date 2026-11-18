@@ -5,9 +5,10 @@ import { db } from "@/lib/db";
 import { autoSubscribe } from "@/server/subscriptions";
 import { markdownExcerpt } from "@/lib/markdown-plain";
 import { parseMentionIds } from "@/lib/mentions";
-import { canModify, hasRole } from "@/lib/roles";
+import { canModify, clientVisibleWhere, hasRole } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
-import { forgetActivity, postActivityPath, recordActivity } from "@/server/activity";
+import { forgetActivity, postActivityPath, recordActivity, syncActivityInternal } from "@/server/activity";
+import { resolveInternal, resolveInternalUpdate } from "@/server/client-visibility";
 import { conflict, forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import {
   addComment,
@@ -31,6 +32,8 @@ const postSchema = z.object({
     .max(64)
     .nullish()
     .transform((v) => (v === undefined ? undefined : v || null)),
+  /** "Yalnızca ekip": hidden from guests (ignored when a guest writes). */
+  internal: z.boolean().optional(),
 });
 
 const createPostSchema = postSchema.extend({
@@ -61,6 +64,8 @@ export type PostListItem = {
   title: string;
   excerpt: string;
   pinned: boolean;
+  /** Team-only: hidden from guests. */
+  internal: boolean;
   /** Not published yet; only the author sees it. */
   isDraft: boolean;
   category: { id: string; name: string; emoji: string } | null;
@@ -128,7 +133,7 @@ export async function listPosts(
         ],
       }
     : null;
-  const and: Prisma.PostWhereInput[] = [];
+  const and: Prisma.PostWhereInput[] = [clientVisibleWhere(ctx)];
   if (opts.draftsOnly) and.push({ publishedAt: null, authorId: ctx.userId });
   else if (opts.includeDrafts === false) and.push({ publishedAt: { not: null } });
   else and.push(visiblePostWhere(ctx));
@@ -152,6 +157,7 @@ export async function listPosts(
     title: p.title,
     excerpt: markdownExcerpt(p.body),
     pinned: p.pinned,
+    internal: p.internal,
     isDraft: p.publishedAt === null,
     category: p.category,
     createdAt: p.createdAt,
@@ -198,12 +204,13 @@ export async function getPost(ctx: TenantContext, postId: string) {
 }
 
 export async function createPost(ctx: TenantContext, input: unknown) {
-  const { draft, projectId, ...data } = parseInput(createPostSchema, input);
+  const { draft, projectId, internal, ...data } = parseInput(createPostSchema, input);
   await assertCategory(ctx, data.categoryId);
   const assignedProjectId = await assertAssignableProject(ctx, projectId);
   const post = await db.post.create({
     data: {
       ...data,
+      internal: resolveInternal(ctx, internal),
       categoryId: data.categoryId ?? null,
       projectId: assignedProjectId,
       workspaceId: ctx.workspaceId,
@@ -217,7 +224,7 @@ export async function createPost(ctx: TenantContext, input: unknown) {
 }
 
 /** Subscribe the author, notify members and record the activity row. Runs once per post, at publish time. */
-async function announcePost(ctx: TenantContext, post: { id: string; title: string; body: string }) {
+async function announcePost(ctx: TenantContext, post: { id: string; title: string; body: string; internal: boolean }) {
   await autoSubscribe(ctx, { type: "post", id: post.id }, [ctx.userId]);
   await notifyNewPost(ctx, post); // after the main write; never throws
   await recordActivity(ctx, {
@@ -256,7 +263,7 @@ function clip(text: string, max: number): string {
  * A new post: every other member gets POST_CREATED, except the members
  * mentioned in the body, who get one MENTION instead. Never throws.
  */
-async function notifyNewPost(ctx: TenantContext, post: { id: string; title: string; body: string }) {
+async function notifyNewPost(ctx: TenantContext, post: { id: string; title: string; body: string; internal: boolean }) {
   try {
     const [actor, members, mentioned] = await Promise.all([
       db.user.findUnique({ where: { id: ctx.userId }, select: { name: true, email: true } }),
@@ -271,12 +278,14 @@ async function notifyNewPost(ctx: TenantContext, post: { id: string; title: stri
       title: `${label} yeni bir mesaj paylaştı`,
       body: clip(post.title, 500),
       path: postActivityPath(post.id),
+      internal: post.internal,
     });
     await notifyMentions(ctx, mentioned, {
       title: post.title,
       path: postActivityPath(post.id),
       body: post.body,
       kind: "post",
+      internal: post.internal,
     });
   } catch (e) {
     console.error("[messages] notifyNewPost failed:", e);
@@ -293,21 +302,29 @@ async function findPostInWorkspace(ctx: TenantContext, postId: string) {
 }
 
 export async function updatePost(ctx: TenantContext, postId: string, input: unknown) {
-  const data = parseInput(postSchema, input);
+  const { internal: requestedInternal, ...data } = parseInput(postSchema, input);
   const post = await findPostInWorkspace(ctx, postId);
   if (!canModify(ctx, post.authorId)) throw forbidden("Bu gönderiyi düzenleme yetkiniz yok.");
   await assertCategory(ctx, data.categoryId);
+  const internal = resolveInternalUpdate(ctx, requestedInternal);
   const res = await db.post.updateMany({
     where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null },
-    data,
+    data: { ...data, ...(internal !== undefined ? { internal } : {}) },
   });
   if (res.count === 0) throw notFound("Gönderi bulunamadı.");
+  if (internal !== undefined && internal !== post.internal) await syncActivityInternal(ctx, { type: "post", id: post.id });
   // Editing a draft notifies nobody; mentions are handled when it is published.
   if (post.publishedAt === null) return;
   // Only members who were not mentioned before are notified.
   const before = new Set(parseMentionIds(post.body));
   const added = (await resolveMentionedMembers(ctx, data.body)).filter((id) => !before.has(id));
-  await notifyMentions(ctx, added, { title: data.title, path: postActivityPath(post.id), body: data.body, kind: "post" });
+  await notifyMentions(ctx, added, {
+    title: data.title,
+    path: postActivityPath(post.id),
+    body: data.body,
+    kind: "post",
+    internal: internal ?? post.internal,
+  });
 }
 
 /** Moves the post to the trash (soft delete); restore it with restoreTrashItem. */

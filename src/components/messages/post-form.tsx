@@ -4,6 +4,7 @@ import { useActionState, useEffect } from "react";
 import { toast } from "sonner";
 
 import { FieldError, FormError } from "@/components/form-error";
+import { InternalToggle } from "@/components/internal-toggle";
 import { MentionEditor, type MentionMember } from "@/components/mention-editor";
 import { NativeSelect } from "@/components/native-select";
 import { SubmitButton } from "@/components/submit-button";
@@ -29,9 +30,10 @@ export function PostForm({
   members = [],
   categories = [],
   projects = [],
+  canSetInternal = false,
 }: {
   action: Action;
-  post?: { id: string; title: string; body: string; categoryId?: string | null; isDraft?: boolean };
+  post?: { id: string; title: string; body: string; categoryId?: string | null; isDraft?: boolean; internal?: boolean };
   submitLabel: string;
   onDone?: () => void;
   cancel?: React.ReactNode;
@@ -40,6 +42,8 @@ export function PostForm({
   categories?: MessageCategoryDto[];
   /** Offered only when creating (no `post`). */
   projects?: ProjectOption[];
+  /** Shows the "Yalnızca ekip" toggle (not for guests). */
+  canSetInternal?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, {});
 
@@ -103,6 +107,12 @@ export function PostForm({
           errors={state.fieldErrors?.projectId}
         />
       )}
+      {canSetInternal ? (
+        <InternalToggle
+          id={`${idPrefix}-internal`}
+          defaultChecked={state.values?.internal ? state.values.internal === "on" : Boolean(post?.internal)}
+        />
+      ) : null}
       <div className="grid gap-1.5">
         <Label htmlFor={`${idPrefix}-body`}>Mesaj</Label>
         <MentionEditor

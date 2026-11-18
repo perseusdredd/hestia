@@ -5,6 +5,7 @@ import { dateOnlyToDb, dbToDateOnly, isDateOnly } from "@/lib/date-only";
 import { db } from "@/lib/db";
 import { canModify, hasRole } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
+import { assertNotGuest } from "@/server/client-visibility";
 import { conflict, forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 
 /**
@@ -158,6 +159,7 @@ function toCardDTO(
 
 /** The board: columns in order, each with its non-deleted cards in order. */
 export async function listBoard(ctx: TenantContext): Promise<CardColumnDTO[]> {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   await ensureDefaultColumns(db, ctx.workspaceId, ctx.userId);
   const columns = await db.cardColumn.findMany({
     where: { workspaceId: ctx.workspaceId },
@@ -211,6 +213,7 @@ async function writeColumnPositions(tx: Tx, workspaceId: string, rows: { id: str
 }
 
 export async function createColumn(ctx: TenantContext, input: unknown) {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   requireAdmin(ctx);
   const data = parseInput(columnInputSchema, input);
   return db.$transaction(async (tx) => {
@@ -233,6 +236,7 @@ export async function createColumn(ctx: TenantContext, input: unknown) {
 }
 
 export async function renameColumn(ctx: TenantContext, columnId: string, input: unknown) {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   requireAdmin(ctx);
   const data = parseInput(columnInputSchema, input);
   const res = await db.cardColumn.updateMany({
@@ -244,6 +248,7 @@ export async function renameColumn(ctx: TenantContext, columnId: string, input: 
 
 /** Moves a column one step left ("up") or right ("down"); positions stay dense. */
 export async function moveColumn(ctx: TenantContext, columnId: string, direction: unknown) {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   requireAdmin(ctx);
   const dir = parseInput(directionSchema, direction);
   await db.$transaction(async (tx) => {
@@ -262,6 +267,7 @@ export async function moveColumn(ctx: TenantContext, columnId: string, direction
 
 /** A column can only be deleted when it holds no (non-deleted) cards. */
 export async function deleteColumn(ctx: TenantContext, columnId: string) {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   requireAdmin(ctx);
   await db.$transaction(async (tx) => {
     await lockPositions(tx, ctx.workspaceId);
@@ -302,6 +308,7 @@ async function getCard(ctx: TenantContext, cardId: string, tx: Tx | typeof db = 
 }
 
 export async function createCard(ctx: TenantContext, columnId: string, input: unknown) {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   const data = parseInput(createCardSchema, input);
   await requireAssignee(ctx, data.assigneeId);
   return db.$transaction(async (tx) => {
@@ -326,6 +333,7 @@ export async function createCard(ctx: TenantContext, columnId: string, input: un
 }
 
 export async function updateCard(ctx: TenantContext, cardId: string, input: unknown) {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   const data = parseInput(updateCardSchema, input);
   await getCard(ctx, cardId);
   await requireAssignee(ctx, data.assigneeId);
@@ -346,6 +354,7 @@ export async function updateCard(ctx: TenantContext, cardId: string, input: unkn
  * `position`, default end) moves it to another column. Both columns stay dense.
  */
 export async function moveCard(ctx: TenantContext, cardId: string, input: unknown) {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   const data = parseInput(moveCardSchema, input);
   await db.$transaction(async (tx) => {
     await lockPositions(tx, ctx.workspaceId);
@@ -376,6 +385,7 @@ export async function moveCard(ctx: TenantContext, cardId: string, input: unknow
 }
 
 export async function deleteCard(ctx: TenantContext, cardId: string) {
+  assertNotGuest(ctx, "Kart tablosu yalnızca ekibe açıktır.");
   await db.$transaction(async (tx) => {
     await lockPositions(tx, ctx.workspaceId);
     const card = await getCard(ctx, cardId, tx);

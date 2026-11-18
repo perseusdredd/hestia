@@ -6,6 +6,7 @@ import { ChatRoom } from "@/components/chat/chat-room";
 import { PageHeader } from "@/components/page-header";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { getRealtimeConfig } from "@/lib/pusher/server";
+import { isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { cn } from "@/lib/utils";
 import { getPeer, listConversations, listMessages } from "@/server/chat";
@@ -26,6 +27,7 @@ export default async function ChatPage({
   const { with: withParam } = await searchParams;
   const peerId = typeof withParam === "string" && withParam !== "" ? withParam : undefined;
   const { user, workspace, ctx } = await requireWorkspace(slug);
+  if (isGuest(ctx.role)) notFound(); // team-only page
 
   let peer: Awaited<ReturnType<typeof getPeer>> = null;
   if (peerId) {

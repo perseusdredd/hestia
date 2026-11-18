@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { istanbulDayKey, toIstanbulParts } from "@/lib/istanbul-time";
 import { hasRole } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
+import { assertNotGuest } from "@/server/client-visibility";
 import { conflict, forbidden, notFound, parseInput } from "@/server/errors";
 import { notify } from "@/server/notifications";
 
@@ -52,6 +53,7 @@ function requireAdmin(ctx: TenantContext) {
 }
 
 export async function createQuestion(ctx: TenantContext, input: unknown) {
+  assertNotGuest(ctx, "Check-in yalnızca ekibe açıktır.");
   requireAdmin(ctx);
   const data = parseInput(questionSchema, input);
   const count = await db.checkinQuestion.count({ where: { workspaceId: ctx.workspaceId } });
@@ -62,6 +64,7 @@ export async function createQuestion(ctx: TenantContext, input: unknown) {
 }
 
 export async function updateQuestion(ctx: TenantContext, questionId: string, input: unknown) {
+  assertNotGuest(ctx, "Check-in yalnızca ekibe açıktır.");
   requireAdmin(ctx);
   const data = parseInput(questionSchema, input);
   const res = await db.checkinQuestion.updateMany({
@@ -72,6 +75,7 @@ export async function updateQuestion(ctx: TenantContext, questionId: string, inp
 }
 
 export async function setActive(ctx: TenantContext, questionId: string, active: unknown) {
+  assertNotGuest(ctx, "Check-in yalnızca ekibe açıktır.");
   requireAdmin(ctx);
   const value = parseInput(z.boolean({ error: "Geçersiz değer." }), active);
   const res = await db.checkinQuestion.updateMany({
@@ -121,7 +125,8 @@ export async function runDueCheckins(now: Date): Promise<number> {
 
 async function notifyRound(q: { workspaceId: string; text: string; createdById: string }) {
   const members = await db.membership.findMany({
-    where: { workspaceId: q.workspaceId },
+    // Check-ins are team-only: guests are never asked.
+    where: { workspaceId: q.workspaceId, role: { not: "GUEST" } },
     select: { userId: true, role: true },
   });
   if (members.length === 0) return;
@@ -147,6 +152,7 @@ async function notifyRound(q: { workspaceId: string; text: string; createdById: 
 
 /** Upsert the caller's answer; the round must belong to ctx's workspace. */
 export async function answerCheckin(ctx: TenantContext, roundId: string, body: unknown) {
+  assertNotGuest(ctx, "Check-in yalnızca ekibe açıktır.");
   const text = parseInput(answerSchema, body);
   const round = await db.checkinRound.findFirst({
     where: { id: roundId, workspaceId: ctx.workspaceId },
@@ -186,6 +192,7 @@ export type CheckinRoundDto = {
 export async function listCheckins(
   ctx: TenantContext,
 ): Promise<{ questions: CheckinQuestionDto[]; rounds: CheckinRoundDto[] }> {
+  assertNotGuest(ctx, "Check-in yalnızca ekibe açıktır.");
   const [questions, rounds] = await Promise.all([
     db.checkinQuestion.findMany({
       where: { workspaceId: ctx.workspaceId },

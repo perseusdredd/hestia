@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { createListAction, updateListAction } from "@/app/w/[slug]/todos/actions";
 import { FieldError, FormError } from "@/components/form-error";
+import { InternalToggle } from "@/components/internal-toggle";
 import { ProjectSelect, type ProjectOption } from "@/components/project-select";
 import { SubmitButton } from "@/components/submit-button";
 import { Button } from "@/components/ui/button";
@@ -31,14 +32,16 @@ function ListForm({
   initial,
   trigger,
   projects = [],
+  canSetInternal = false,
 }: {
   title: string;
   submitLabel: string;
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   listId?: string;
-  initial?: { name: string; description: string | null };
+  initial?: { name: string; description: string | null; internal?: boolean };
   trigger: React.ReactElement;
   projects?: ProjectOption[];
+  canSetInternal?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // New key on every open: fresh action state, no stale error or rejected values.
@@ -63,6 +66,7 @@ function ListForm({
           listId={listId}
           initial={initial}
           projects={projects}
+          canSetInternal={canSetInternal}
           onSaved={close}
         />
       </DialogContent>
@@ -78,14 +82,16 @@ function ListFormBody({
   initial,
   onSaved,
   projects = [],
+  canSetInternal = false,
 }: {
   title: string;
   submitLabel: string;
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   listId?: string;
-  initial?: { name: string; description: string | null };
+  initial?: { name: string; description: string | null; internal?: boolean };
   onSaved: () => void;
   projects?: ProjectOption[];
+  canSetInternal?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
 
@@ -133,6 +139,9 @@ function ListFormBody({
             />
             <FieldError errors={state.fieldErrors?.description} />
           </div>
+          {canSetInternal ? (
+            <InternalToggle id={`list-internal-${listId ?? "new"}`} defaultChecked={Boolean(initial?.internal)} />
+          ) : null}
           {listId ? null : (
             <ProjectSelect
               projects={projects}
@@ -151,13 +160,22 @@ function ListFormBody({
   );
 }
 
-export function NewListButton({ slug, projects = [] }: { slug: string; projects?: ProjectOption[] }) {
+export function NewListButton({
+  slug,
+  projects = [],
+  canSetInternal = false,
+}: {
+  slug: string;
+  projects?: ProjectOption[];
+  canSetInternal?: boolean;
+}) {
   return (
     <ListForm
       title="Yeni liste"
       submitLabel="Oluştur"
       action={createListAction.bind(null, slug)}
       projects={projects}
+      canSetInternal={canSetInternal}
       trigger={
         <Button>
           <Plus aria-hidden />
@@ -171,9 +189,11 @@ export function NewListButton({ slug, projects = [] }: { slug: string; projects?
 export function EditListButton({
   slug,
   list,
+  canSetInternal = false,
 }: {
   slug: string;
-  list: { id: string; name: string; description: string | null };
+  list: { id: string; name: string; description: string | null; internal?: boolean };
+  canSetInternal?: boolean;
 }) {
   return (
     <ListForm
@@ -182,6 +202,7 @@ export function EditListButton({
       action={updateListAction.bind(null, slug)}
       listId={list.id}
       initial={list}
+      canSetInternal={canSetInternal}
       trigger={
         <Button variant="ghost" size="icon-sm" aria-label="Listeyi düzenle">
           <Pencil aria-hidden />

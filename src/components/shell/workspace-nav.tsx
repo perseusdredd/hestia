@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { NAV_ITEMS, workspaceHref } from "@/components/shell/nav-items";
+import { navItemsFor, workspaceHref } from "@/components/shell/nav-items";
 import { cn } from "@/lib/utils";
 
 function useActiveSegment(slug: string) {
@@ -14,11 +14,11 @@ function useActiveSegment(slug: string) {
 }
 
 /** Vertical nav for the desktop sidebar. */
-export function SidebarNav({ slug }: { slug: string }) {
+export function SidebarNav({ slug, guest = false }: { slug: string; guest?: boolean }) {
   const active = useActiveSegment(slug);
   return (
     <nav aria-label="Çalışma alanı" className="grid gap-0.5">
-      {NAV_ITEMS.map(({ segment, label, icon: Icon }) => {
+      {navItemsFor(guest).map(({ segment, label, icon: Icon }) => {
         const isActive = active === segment;
         return (
           <Link
@@ -44,14 +44,14 @@ export function SidebarNav({ slug }: { slug: string }) {
 }
 
 /** Horizontally scrollable tab strip for small screens. */
-export function MobileNav({ slug }: { slug: string }) {
+export function MobileNav({ slug, guest = false }: { slug: string; guest?: boolean }) {
   const active = useActiveSegment(slug);
   return (
     <nav
       aria-label="Çalışma alanı"
       className="-mx-4 flex overflow-x-auto px-2 [scrollbar-width:none] md:hidden"
     >
-      {NAV_ITEMS.map(({ segment, label, icon: Icon }) => {
+      {navItemsFor(guest).map(({ segment, label, icon: Icon }) => {
         const isActive = active === segment;
         return (
           <Link

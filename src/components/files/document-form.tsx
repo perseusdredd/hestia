@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { createDocumentAction, updateDocumentAction } from "@/app/w/[slug]/files/actions";
 import { FieldError, FormError } from "@/components/form-error";
+import { InternalToggle } from "@/components/internal-toggle";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { SubmitButton } from "@/components/submit-button";
 import { buttonVariants } from "@/components/ui/button";
@@ -18,11 +19,14 @@ export function DocumentForm({
   folderId,
   document,
   cancelHref,
+  canSetInternal = false,
 }: {
   slug: string;
   folderId: string | null;
-  document?: { id: string; title: string; content: string };
+  document?: { id: string; title: string; content: string; internal?: boolean };
   cancelHref: string;
+  /** Shows the "Yalnızca ekip" toggle (not for guests). */
+  canSetInternal?: boolean;
 }) {
   const action = document ? updateDocumentAction.bind(null, slug) : createDocumentAction.bind(null, slug);
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, {});
@@ -50,6 +54,7 @@ export function DocumentForm({
         />
         <FieldError errors={state.fieldErrors?.title} />
       </div>
+      {canSetInternal ? <InternalToggle id="doc-internal" defaultChecked={Boolean(document?.internal)} /> : null}
       <div className="grid gap-1.5">
         <Label htmlFor="doc-content">İçerik</Label>
         <MarkdownEditor

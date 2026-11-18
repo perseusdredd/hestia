@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { formString, toActionState, type ActionState } from "@/lib/action-state";
+import { formFlag, formString, toActionState, type ActionState } from "@/lib/action-state";
 import { requireWorkspace } from "@/lib/tenant";
 import { createEvent, deleteEvent, updateEvent } from "@/server/calendar";
 
@@ -18,13 +18,14 @@ function readEvent(formData: FormData) {
     recurrenceUntil: formString(formData, "recurrenceUntil"),
     inviteeIds: formData.getAll("inviteeIds").map(String),
     projectId: formString(formData, "projectId"),
+    internal: formFlag(formData, "internal"),
   };
 }
 
 function toValues(v: ReturnType<typeof readEvent>): Record<string, string> {
-  const { inviteeIds: _inviteeIds, recurrence, ...rest } = v;
+  const { inviteeIds: _inviteeIds, recurrence, internal, ...rest } = v;
   void _inviteeIds;
-  return { ...rest, recurrence: recurrence ?? "NONE", allDay: v.allDay ? "on" : "" };
+  return { ...rest, recurrence: recurrence ?? "NONE", allDay: v.allDay ? "on" : "", internal: internal ? "on" : "" };
 }
 
 export async function createEventAction(

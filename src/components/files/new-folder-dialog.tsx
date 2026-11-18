@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { createFolderAction } from "@/app/w/[slug]/files/actions";
 import { FieldError, FormError } from "@/components/form-error";
+import { InternalToggle } from "@/components/internal-toggle";
 import { ProjectSelect, type ProjectOption } from "@/components/project-select";
 import { SubmitButton } from "@/components/submit-button";
 import { Button } from "@/components/ui/button";
@@ -27,11 +28,13 @@ function NewFolderForm({
   slug,
   parentId,
   projects,
+  canSetInternal,
   onDone,
 }: {
   slug: string;
   parentId: string | null;
   projects: ProjectOption[];
+  canSetInternal: boolean;
   onDone: () => void;
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
@@ -70,6 +73,7 @@ function NewFolderForm({
         />
         <FieldError errors={state.fieldErrors?.name} />
       </div>
+      {canSetInternal ? <InternalToggle id="new-folder-internal" /> : null}
       {/* A subfolder follows its parent project, so only root folders pick one. */}
       {parentId ? null : (
         <ProjectSelect
@@ -93,10 +97,12 @@ export function NewFolderDialog({
   slug,
   parentId,
   projects = [],
+  canSetInternal = false,
 }: {
   slug: string;
   parentId: string | null;
   projects?: ProjectOption[];
+  canSetInternal?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -107,7 +113,13 @@ export function NewFolderDialog({
       </DialogTrigger>
       <DialogContent>
         {/* Remount on every open so the form starts empty. */}
-        {open ? <NewFolderForm slug={slug} parentId={parentId} projects={projects} onDone={() => setOpen(false)} /> : null}
+        {open ? <NewFolderForm
+            slug={slug}
+            parentId={parentId}
+            projects={projects}
+            canSetInternal={canSetInternal}
+            onDone={() => setOpen(false)}
+          /> : null}
       </DialogContent>
     </Dialog>
   );

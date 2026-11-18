@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { CalendarClock } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
@@ -5,7 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/format";
 import { istanbulDayKey } from "@/lib/istanbul-time";
-import { hasRole } from "@/lib/roles";
+import { hasRole, isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { listCheckins, type CheckinAnswerDto } from "@/server/checkins";
 
@@ -35,6 +36,7 @@ function Answers({ answers }: { answers: CheckinAnswerDto[] }) {
 export default async function CheckinsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { ctx } = await requireWorkspace(slug);
+  if (isGuest(ctx.role)) notFound(); // team-only page
   const { questions, rounds } = await listCheckins(ctx);
   const isAdmin = hasRole(ctx.role, "ADMIN");
   const today = istanbulDayKey(new Date());

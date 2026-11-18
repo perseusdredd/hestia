@@ -7,6 +7,7 @@ import { tr } from "date-fns/locale";
 import { CalendarClock, CheckSquare, MapPin, MessageCircle, Plus } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
+import { InternalBadge } from "@/components/internal-toggle";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { agendaTimeLabel } from "@/lib/event-labels";
@@ -26,6 +27,7 @@ export function CalendarView({
   events,
   members,
   projects = [],
+  canSetInternal = false,
   todayKey,
   defaultDayKey,
   toolbar,
@@ -37,6 +39,8 @@ export function CalendarView({
   members: CalMember[];
   /** Active projects, offered when creating an event. */
   projects?: ProjectOption[];
+  /** Shows the "Yalnızca ekip" toggle in the event dialog (not for guests). */
+  canSetInternal?: boolean;
   todayKey: string;
   /** Day pre-filled by the "Yeni etkinlik" button (today if in this month, else the 1st). */
   defaultDayKey: string;
@@ -230,7 +234,10 @@ export function CalendarView({
                             className="w-full rounded-lg px-2 py-1.5 text-left outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
                           >
                             <span className="block text-xs text-muted-foreground">{agendaTimeLabel(e, day.key)}</span>
-                            <span className="block break-words text-sm font-medium">{e.title}</span>
+                            <span className="flex flex-wrap items-center gap-2 break-words text-sm font-medium">
+                              {e.title}
+                              {e.internal ? <InternalBadge /> : null}
+                            </span>
                             {e.location ? (
                               <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
                                 <MapPin className="size-3 shrink-0" aria-hidden />
@@ -269,7 +276,14 @@ export function CalendarView({
         )}
       </section>
 
-      <EventDialog slug={slug} target={target} members={members} projects={projects} onClose={close} />
+      <EventDialog
+        slug={slug}
+        target={target}
+        members={members}
+        projects={projects}
+        canSetInternal={canSetInternal}
+        onClose={close}
+      />
     </div>
   );
 }

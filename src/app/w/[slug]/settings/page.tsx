@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LogOut, MailPlus, UserMinus, X } from "lucide-react";
 
@@ -8,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDate } from "@/lib/format";
-import { hasRole, ROLE_LABELS, type Role } from "@/lib/roles";
+import { hasRole, ROLE_LABELS, type Role, isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { listCategories } from "@/server/message-categories";
 import { getMutedTypes } from "@/server/notification-preferences";
@@ -37,6 +38,7 @@ export const metadata: Metadata = { title: "Ayarlar" };
 export default async function SettingsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { ctx, workspace } = await requireWorkspace(slug);
+  if (isGuest(ctx.role)) notFound(); // team-only page
   const isAdmin = hasRole(ctx.role, "ADMIN");
   const isOwner = ctx.role === "OWNER";
 
@@ -48,7 +50,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
   ]);
 
   const origin = isAdmin ? await getRequestOrigin() : "";
-  const assignableRoles: Role[] = isOwner ? ["MEMBER", "ADMIN", "OWNER"] : ["MEMBER", "ADMIN"];
+  const assignableRoles: Role[] = isOwner ? ["MEMBER", "ADMIN", "OWNER", "GUEST"] : ["MEMBER", "ADMIN", "GUEST"];
   const ownerCount = members.filter((m) => m.role === "OWNER").length;
 
   return (
@@ -106,7 +108,9 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
               const canRemove =
                 !isSelf && isAdmin && (m.role !== "OWNER" || isOwner);
               const roleOptions: Role[] =
-                m.role === "OWNER" || isOwner ? ["MEMBER", "ADMIN", "OWNER"] : ["MEMBER", "ADMIN"];
+                m.role === "OWNER" || isOwner
+                  ? ["MEMBER", "ADMIN", "OWNER", "GUEST"]
+                  : ["MEMBER", "ADMIN", "GUEST"];
               return (
                 <li key={m.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
                   <UserAvatar user={m.user} />

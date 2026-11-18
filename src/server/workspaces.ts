@@ -31,7 +31,7 @@ const emailSchema = z
   .toLowerCase()
   .pipe(z.email("Geçerli bir e-posta adresi girin."));
 
-const roleSchema = z.enum(["OWNER", "ADMIN", "MEMBER"], { error: "Geçersiz rol." });
+const roleSchema = z.enum(["OWNER", "ADMIN", "MEMBER", "GUEST"], { error: "Geçersiz rol." });
 
 export const workspaceNameSchema = z
   .string({ error: "Ad gerekli." })
@@ -51,7 +51,7 @@ export const slugSchema = z
 const createWorkspaceSchema = z.object({ name: workspaceNameSchema, slug: slugSchema });
 const inviteSchema = z.object({ email: emailSchema, role: roleSchema });
 // Link invites never grant OWNER: a link can be forwarded to anyone.
-const inviteLinkSchema = z.object({ role: z.enum(["MEMBER", "ADMIN"], { error: "Geçersiz rol." }) });
+const inviteLinkSchema = z.object({ role: z.enum(["MEMBER", "ADMIN", "GUEST"], { error: "Geçersiz rol." }) });
 const idSchema = z.string().min(1).max(64);
 
 // ----------------------------------------------------------- helpers ----
@@ -234,7 +234,7 @@ export async function listMembers(ctx: TenantContext) {
     where: { workspaceId: ctx.workspaceId },
     include: { user: { select: { id: true, name: true, email: true, image: true } } },
   });
-  const order: Record<Role, number> = { OWNER: 0, ADMIN: 1, MEMBER: 2 };
+  const order: Record<Role, number> = { OWNER: 0, ADMIN: 1, MEMBER: 2, GUEST: 3 };
   return rows
     .map((m) => ({
       id: m.id,

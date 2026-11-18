@@ -10,6 +10,7 @@ import { ShellSearch } from "@/components/shell/shell-search";
 import { UserMenu } from "@/components/shell/user-menu";
 import { MobileNav, SidebarNav } from "@/components/shell/workspace-nav";
 import { WorkspaceSwitcher } from "@/components/shell/workspace-switcher";
+import { isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { isVerifyBannerDismissed, VERIFY_BANNER_COOKIE } from "@/lib/verify-banner";
 import { listNotifications, NOTIFICATION_BELL_ITEMS, unreadCount } from "@/server/notifications";
@@ -65,7 +66,7 @@ export default async function WorkspaceLayout({
               className="h-10 w-full border-border bg-card hover:bg-accent"
             />
           </div>
-          <SidebarNav slug={workspace.slug} />
+          <SidebarNav slug={workspace.slug} guest={isGuest(ctx.role)} />
         </div>
       </aside>
 
@@ -94,7 +95,7 @@ export default async function WorkspaceLayout({
           </div>
           <div className="grid gap-2 px-4 pt-0.5 md:hidden">
             <ShellSearch slug={workspace.slug} id="shell-search-mobile" />
-            <MobileNav slug={workspace.slug} />
+            <MobileNav slug={workspace.slug} guest={isGuest(ctx.role)} />
           </div>
         </header>
         <main id={MAIN_ID} tabIndex={-1} className="outline-none mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">

@@ -38,6 +38,8 @@ export type ActionItem = {
   name: string;
   /** Folder the item currently lives in (parentId for folders). */
   locationId: string | null;
+  /** Team-only ("Yalnızca ekip") folder or document. */
+  internal?: boolean;
 };
 
 const KIND_LABEL: Record<ItemKind, string> = { folder: "Klasör", file: "Dosya", document: "Doküman" };
@@ -50,6 +52,8 @@ export type ItemMenuProps = {
   canModify: boolean;
   current: boolean;
   onDialog: (d: ItemDialog) => void;
+  /** Offer "Yalnızca ekip yap" for a folder (not for guests). */
+  canSetInternal?: boolean;
 };
 
 export const itemMenuLabel = (item: ActionItem, current: boolean) =>
@@ -209,12 +213,14 @@ export function ItemActions({
   canModify,
   folders,
   current = false,
+  canSetInternal = false,
 }: {
   slug: string;
   item: ActionItem;
   canModify: boolean;
   folders: FolderNode[];
   current?: boolean;
+  canSetInternal?: boolean;
 }) {
   const [dialog, setDialog] = useState<ItemDialog | null>(null);
   const close = useCallback(() => setDialog(null), []);
@@ -225,7 +231,7 @@ export function ItemActions({
     <>
       <DeferredMenu
         load={loadItemMenu}
-        props={{ slug, item, canModify, current, onDialog: setDialog }}
+        props={{ slug, item, canModify, current, onDialog: setDialog, canSetInternal }}
         placeholder={(p) =>
           current ? (
             <Button {...p} variant="outline" aria-label={itemMenuLabel(item, true)}>

@@ -8,6 +8,7 @@ import { CommentThread } from "@/components/comments/comment-thread";
 import { BookmarkToggle } from "@/components/bookmarks/bookmark-toggle";
 import { SubscribeToggle } from "@/components/subscriptions/subscribe-toggle";
 import { RichText } from "@/components/linkified-text";
+import { InternalBadge } from "@/components/internal-toggle";
 import { PageHeader } from "@/components/page-header";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -70,7 +71,12 @@ export default async function EventPage({ params }: { params: Params }) {
 
       <div className="max-w-3xl space-y-5">
         <PageHeader
-          title={<span className="block whitespace-normal break-words">{event.title}</span>}
+          title={
+            <span className="flex flex-wrap items-center gap-2 whitespace-normal break-words">
+              {event.title}
+              {event.internal ? <InternalBadge /> : null}
+            </span>
+          }
           description={
             <span className="inline-flex flex-wrap items-center gap-1.5">
               <CalendarClock className="size-4" aria-hidden />

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { FilesBreadcrumbs } from "@/components/files/breadcrumbs";
 import { DocumentForm } from "@/components/files/document-form";
 import { PageHeader } from "@/components/page-header";
-import { canModify } from "@/lib/roles";
+import { canModify, isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { getDocument } from "@/server/files";
 
@@ -31,7 +31,8 @@ export default async function EditDocumentPage({
       <DocumentForm
         slug={slug}
         folderId={document.folderId}
-        document={{ id: document.id, title: document.title, content: document.content }}
+        document={{ id: document.id, title: document.title, content: document.content, internal: document.internal }}
+        canSetInternal={!isGuest(ctx.role)}
         cancelHref={documentHref(slug, document.id)}
       />
     </div>

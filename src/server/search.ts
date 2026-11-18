@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { istanbulDayKey } from "@/lib/istanbul-time";
 import { SEARCH_MAX_LENGTH, SEARCH_MIN_LENGTH } from "@/lib/search-limits";
+import { clientVisibleWhere } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { mentionsToPlain } from "@/lib/mentions";
 import {
@@ -11,11 +12,13 @@ import {
   type CommentSubject,
   type CommentSubjectType,
 } from "@/server/comments";
+import { documentClientWhere, fileClientWhere } from "@/server/client-visibility";
 import { parseInput } from "@/server/errors";
 import { visiblePostWhere } from "@/server/post-visibility";
 
 /**
- * Workspace search. Every query below is scoped by ctx.workspaceId.
+ * Workspace search. Every query below is scoped by ctx.workspaceId. A GUEST
+ * only finds what it could open: nothing marked internal ("Yalnızca ekip").
  *
  * Matching: Prisma `contains` + `mode: "insensitive"` compiles to Postgres
  * `ILIKE '%' || value || '%'` and does NOT escape LIKE metacharacters in the
@@ -250,9 +253,9 @@ export async function searchWorkspace(
             {
               OR: [
                 { post: { workspaceId, deletedAt: null, ...visiblePostWhere(ctx) } },
-                { todoItem: { workspaceId, deletedAt: null } },
-                { document: { workspaceId, deletedAt: null } },
-                { event: { workspaceId, deletedAt: null } },
+                { todoItem: { workspaceId, deletedAt: null, list: { deletedAt: null, ...clientVisibleWhere(ctx) } } },
+                { document: { workspaceId, deletedAt: null, ...documentClientWhere(ctx) } },
+                { event: { workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) } },
               ],
             },
             { OR: anyFieldContains<Prisma.CommentWhereInput>(["body"], variants) },
@@ -295,7 +298,7 @@ export async function searchWorkspace(
         where: {
           workspaceId,
           deletedAt: null,
-          list: { workspaceId, deletedAt: null },
+          list: { workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
           OR: anyFieldContains<Prisma.TodoItemWhereInput>(["title", "notes"], variants),
         },
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -328,6 +331,7 @@ export async function searchWorkspace(
         where: {
           workspaceId,
           deletedAt: null,
+          ...clientVisibleWhere(ctx),
           OR: anyFieldContains<Prisma.TodoListWhereInput>(["name"], variants),
         },
         orderBy: [{ position: "asc" }, { id: "asc" }],
@@ -359,6 +363,7 @@ export async function searchWorkspace(
         where: {
           workspaceId,
           deletedAt: null,
+          ...documentClientWhere(ctx),
           OR: anyFieldContains<Prisma.DocumentWhereInput>(["title", "content"], variants),
         },
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -391,6 +396,7 @@ export async function searchWorkspace(
           workspaceId,
           fromChat: false,
           deletedAt: null,
+          ...fileClientWhere(ctx),
           OR: anyFieldContains<Prisma.FileWhereInput>(["name"], variants),
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -427,6 +433,7 @@ export async function searchWorkspace(
         where: {
           workspaceId,
           deletedAt: null,
+          ...clientVisibleWhere(ctx),
           OR: anyFieldContains<Prisma.FolderWhereInput>(["name"], variants),
         },
         orderBy: [{ name: "asc" }, { id: "asc" }],
@@ -457,6 +464,7 @@ export async function searchWorkspace(
         where: {
           workspaceId,
           deletedAt: null,
+          ...clientVisibleWhere(ctx),
           OR: anyFieldContains<Prisma.EventWhereInput>(
             ["title", "description", "location"],
             variants,

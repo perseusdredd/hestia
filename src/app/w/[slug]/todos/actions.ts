@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { formString, toActionState, type ActionState } from "@/lib/action-state";
+import { formFlag, formString, toActionState, type ActionState } from "@/lib/action-state";
 import { requireWorkspace } from "@/lib/tenant";
 import { getHillHistory, setHillPosition, type HillSnapshotDTO } from "@/server/hill";
 import {
@@ -38,7 +38,7 @@ export async function createListAction(
   };
   try {
     const { ctx } = await requireWorkspace(slug);
-    await createTodoList(ctx, values);
+    await createTodoList(ctx, { ...values, internal: formFlag(formData, "internal") });
     revalidate(slug);
     return { ok: true, message: "Liste oluşturuldu." };
   } catch (e) {
@@ -57,7 +57,7 @@ export async function updateListAction(
   };
   try {
     const { ctx } = await requireWorkspace(slug);
-    await updateTodoList(ctx, formString(formData, "id"), values);
+    await updateTodoList(ctx, formString(formData, "id"), { ...values, internal: formFlag(formData, "internal") });
     revalidate(slug);
     return { ok: true, message: "Liste güncellendi." };
   } catch (e) {

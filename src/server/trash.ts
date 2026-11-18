@@ -14,6 +14,7 @@ import {
   type ActivitySubject,
 } from "@/server/activity";
 import { deleteObjects, restoreFolderTree } from "@/server/files";
+import { assertNotGuest } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { visiblePostWhere } from "@/server/post-visibility";
 
@@ -78,6 +79,7 @@ export function purgeDate(deletedAt: Date): Date {
  * they own; ADMIN+ see everything.
  */
 export async function listTrash(ctx: TenantContext): Promise<TrashItemDTO[]> {
+  assertNotGuest(ctx, "Çöp kutusu yalnızca ekibe açıktır.");
   const base = { workspaceId: ctx.workspaceId, deletedAt: { not: null } } as const;
   const admin = hasRole(ctx.role, "ADMIN");
   const mine = <K extends string>(key: K) => (admin ? {} : ({ [key]: ctx.userId } as Record<K, string>));
@@ -229,6 +231,7 @@ const parentDeleted = (what: string) =>
  * file / document / folder whose folder is trashed, cannot come back alone.
  */
 export async function restoreTrashItem(ctx: TenantContext, input: unknown): Promise<{ title: string }> {
+  assertNotGuest(ctx, "Çöp kutusu yalnızca ekibe açıktır.");
   const { kind, id } = parseInput(refSchema, input);
   const found = await findTrashed(ctx, kind, id);
   if (!canModify(ctx, found.ownerId)) throw forbidden("Bu öğeyi geri yükleme yetkiniz yok.");
@@ -322,6 +325,7 @@ export async function purgeTrashItem(
   input: unknown,
   storage?: StorageDriver,
 ): Promise<{ title: string }> {
+  assertNotGuest(ctx, "Çöp kutusu yalnızca ekibe açıktır.");
   const { kind, id } = parseInput(refSchema, input);
   const found = await findTrashed(ctx, kind, id);
   if (!canModify(ctx, found.ownerId)) throw forbidden("Bu öğeyi kalıcı olarak silme yetkiniz yok.");

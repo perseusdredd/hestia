@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { MAX_MENTIONS, mentionsToPlain, parseMentionIds } from "@/lib/mentions";
-import { canModify } from "@/lib/roles";
+import { canModify, clientVisibleWhere } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, recordActivity } from "@/server/activity";
+import { documentClientWhere } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput } from "@/server/errors";
 import { visiblePostWhere } from "@/server/post-visibility";
 import {
@@ -26,7 +27,9 @@ import { autoSubscribe, ensureSubscribers, listSubscriberIds } from "@/server/su
  * four foreign keys (the DB also enforces that with a CHECK constraint).
  *
  * Permissions: any member comments; authors edit/delete their own comments;
- * ADMIN/OWNER anything.
+ * ADMIN/OWNER anything. A GUEST can comment on (and read) the subjects it can
+ * see, i.e. everything that is not internal ("Yalnızca ekip"): a to-do follows
+ * its list, a document its own flag and folder.
  */
 
 export const COMMENT_SUBJECT_TYPES = ["post", "todo", "document", "event"] as const;
@@ -115,6 +118,8 @@ type LoadedSubject = CommentSubject & {
   ownerIds: string[];
   /** True only for an unpublished post (draft): no activity or notifications may leak its title/body. */
   isDraft: boolean;
+  /** Team-only subject: its notifications never go to guests. */
+  internal: boolean;
 };
 
 const NOT_FOUND_MESSAGES: Record<CommentSubjectType, string> = {
@@ -141,30 +146,49 @@ async function loadSubject(ctx: TenantContext, input: unknown): Promise<LoadedSu
     case "post": {
       const row = await db.post.findFirst({
         where: { ...where, ...visiblePostWhere(ctx) },
-        select: { id: true, title: true, authorId: true, publishedAt: true },
+        select: { id: true, title: true, authorId: true, publishedAt: true, internal: true },
       });
-      if (row) found = { ...subject, title: row.title, ownerIds: [row.authorId], isDraft: row.publishedAt === null };
+      if (row) {
+        found = {
+          ...subject,
+          title: row.title,
+          ownerIds: [row.authorId],
+          isDraft: row.publishedAt === null,
+          internal: row.internal,
+        };
+      }
       break;
     }
     case "todo": {
       const row = await db.todoItem.findFirst({
-        where: { ...where, list: { workspaceId: ctx.workspaceId, deletedAt: null } },
-        select: { id: true, title: true, createdById: true, assigneeId: true },
+        where: { ...where, list: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) } },
+        select: { id: true, title: true, createdById: true, assigneeId: true, list: { select: { internal: true } } },
       });
       if (row) {
         const ids = [row.createdById, ...(row.assigneeId ? [row.assigneeId] : [])];
-        found = { ...subject, title: row.title, ownerIds: ids, isDraft: false };
+        found = { ...subject, title: row.title, ownerIds: ids, isDraft: false, internal: row.list.internal };
       }
       break;
     }
     case "document": {
-      const row = await db.document.findFirst({ where, select: { id: true, title: true, authorId: true } });
-      if (row) found = { ...subject, title: row.title, ownerIds: [row.authorId], isDraft: false };
+      const row = await db.document.findFirst({
+        where: { ...where, ...documentClientWhere(ctx) },
+        select: { id: true, title: true, authorId: true, internal: true, folder: { select: { internal: true } } },
+      });
+      if (row) {
+        const internal = row.internal || (row.folder?.internal ?? false);
+        found = { ...subject, title: row.title, ownerIds: [row.authorId], isDraft: false, internal };
+      }
       break;
     }
     case "event": {
-      const row = await db.event.findFirst({ where, select: { id: true, title: true, createdById: true } });
-      if (row) found = { ...subject, title: row.title, ownerIds: [row.createdById], isDraft: false };
+      const row = await db.event.findFirst({
+        where: { ...where, ...clientVisibleWhere(ctx) },
+        select: { id: true, title: true, createdById: true, internal: true },
+      });
+      if (row) {
+        found = { ...subject, title: row.title, ownerIds: [row.createdById], isDraft: false, internal: row.internal };
+      }
       break;
     }
   }
@@ -249,7 +273,14 @@ type DeliveredType = Extract<NotificationType, "POST_COMMENT" | "COMMENT" | "MEN
 /** notify() with the title and body clipped to its limits. Never throws. */
 function deliver(
   ctx: TenantContext,
-  input: { recipientIds: string[]; type: DeliveredType; title: string; body?: string | null; path: string },
+  input: {
+    recipientIds: string[];
+    type: DeliveredType;
+    title: string;
+    body?: string | null;
+    path: string;
+    internal?: boolean;
+  },
 ): Promise<number> {
   return notify(ctx, {
     recipientIds: [...new Set(input.recipientIds)].slice(0, 5000),
@@ -257,6 +288,7 @@ function deliver(
     title: clip(input.title, NOTIFICATION_TITLE_MAX),
     body: input.body ? clip(input.body, NOTIFICATION_BODY_MAX) : null,
     path: input.path,
+    internal: input.internal,
   });
 }
 
@@ -264,7 +296,14 @@ function deliver(
 export async function notifyMentions(
   ctx: TenantContext,
   ids: string[],
-  where: { title: string; path: string; body: string; kind: "post" | { comment: CommentSubjectType } },
+  where: {
+    title: string;
+    path: string;
+    body: string;
+    kind: "post" | { comment: CommentSubjectType };
+    /** Team-only subject: guests are not notified. */
+    internal?: boolean;
+  },
 ): Promise<number> {
   try {
     if (ids.length === 0) return 0;
@@ -281,6 +320,7 @@ export async function notifyMentions(
       title,
       body: clip(mentionsToPlain(where.body, names), 200),
       path: where.path,
+      internal: where.internal,
     });
   } catch (e) {
     console.error("[comments] notifyMentions failed:", e);
@@ -328,12 +368,14 @@ async function notifyNewComment(
       title: `${actor} “${clip(subject.title, 80)}” ${SUBJECT_WORDS[subject.type].dative} yorum yaptı`,
       body: clip(mentionsToPlain(comment.body, names), 200),
       path,
+      internal: subject.internal,
     });
     await notifyMentions(ctx, mentioned, {
       title: subject.title,
       path,
       body: comment.body,
       kind: { comment: subject.type },
+      internal: subject.internal,
     });
   } catch (e) {
     console.error("[comments] notifyNewComment failed:", e);
@@ -471,6 +513,7 @@ export async function updateComment(
       path: commentSubjectPath(subject),
       body: data.body,
       kind: { comment: subject.type },
+      internal: subject.internal,
     });
   }
   return { subject: { type: subject.type, id: subject.id } };

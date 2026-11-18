@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { MessageSquare, Pin } from "lucide-react";
 
+import { InternalBadge } from "@/components/internal-toggle";
 import { Badge } from "@/components/ui/badge";
 import { CategoryBadge } from "@/components/messages/category-badge";
 import { displayName, UserAvatar } from "@/components/user-avatar";
@@ -24,6 +25,7 @@ export function PostCard({ slug, post }: { slug: string; post: PostListItem }) {
                 Taslak
               </Badge>
             ) : null}
+            {post.internal ? <InternalBadge className="shrink-0" /> : null}
             {post.category ? <CategoryBadge category={post.category} className="shrink-0" /> : null}
             {post.pinned ? (
               <Badge variant="secondary" className="shrink-0">

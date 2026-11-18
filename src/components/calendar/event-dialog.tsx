@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { createEventAction, deleteEventAction, updateEventAction } from "@/app/w/[slug]/calendar/actions";
 import { ConfirmAction } from "@/components/confirm-action";
 import { FieldError, FormError } from "@/components/form-error";
+import { InternalToggle } from "@/components/internal-toggle";
 import { ProjectSelect, type ProjectOption } from "@/components/project-select";
 import { SubmitButton } from "@/components/submit-button";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -39,12 +40,15 @@ export function EventDialog({
   target,
   members,
   projects = [],
+  canSetInternal = false,
   onClose,
 }: {
   slug: string;
   target: DialogTarget;
   members: CalMember[];
   projects?: ProjectOption[];
+  /** Shows the "Yalnızca ekip" toggle (not for guests). */
+  canSetInternal?: boolean;
   onClose: () => void;
 }) {
   const event = target?.mode === "edit" ? target.event : null;
@@ -70,6 +74,7 @@ export function EventDialog({
               event={event}
               members={members}
               projects={projects}
+              canSetInternal={canSetInternal}
               defaultDay={target.mode === "create" ? target.dayKey : null}
               readOnly={readOnly}
               onDone={onClose}
@@ -111,6 +116,7 @@ function EventForm({
   event,
   members,
   projects,
+  canSetInternal,
   defaultDay,
   readOnly,
   onDone,
@@ -119,6 +125,7 @@ function EventForm({
   event: CalEvent | null;
   members: CalMember[];
   projects: ProjectOption[];
+  canSetInternal: boolean;
   defaultDay: string | null;
   readOnly: boolean;
   onDone: () => void;
@@ -175,6 +182,13 @@ function EventForm({
         />
         <FieldError errors={fe?.title} />
       </div>
+
+      {canSetInternal && !readOnly ? (
+        <InternalToggle
+          id="ev-internal"
+          defaultChecked={v ? v.internal === "on" : Boolean(event?.internal)}
+        />
+      ) : null}
 
       <label className="flex items-center gap-2 text-sm">
         <input

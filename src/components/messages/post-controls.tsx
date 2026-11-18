@@ -73,15 +73,26 @@ export function PostControls({
   canPin,
   members = [],
   categories = [],
+  canSetInternal = false,
   children,
 }: {
   slug: string;
-  post: { id: string; title: string; body: string; pinned: boolean; categoryId: string | null; isDraft: boolean };
+  post: {
+    id: string;
+    title: string;
+    body: string;
+    pinned: boolean;
+    categoryId: string | null;
+    isDraft: boolean;
+    internal?: boolean;
+  };
   canModify: boolean;
   canPin: boolean;
   /** Offered when typing "@" while editing the body. */
   members?: MentionMember[];
   categories?: MessageCategoryDto[];
+  /** Shows the "Yalnızca ekip" toggle while editing (not for guests). */
+  canSetInternal?: boolean;
   children: React.ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
@@ -96,6 +107,7 @@ export function PostControls({
         onDone={stopEditing}
         members={members}
         categories={categories}
+        canSetInternal={canSetInternal}
         cancel={
           <Button type="button" variant="ghost" onClick={stopEditing}>
             Vazgeç

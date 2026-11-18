@@ -12,9 +12,10 @@ import {
   parseIstanbulLocal,
 } from "@/lib/istanbul-time";
 import { expandOccurrences, RECURRENCES, type Occurrence } from "@/lib/recurrence";
-import { canModify } from "@/lib/roles";
+import { canModify, clientVisibleWhere } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
-import { eventActivityPath, forgetActivity, recordActivity } from "@/server/activity";
+import { eventActivityPath, forgetActivity, recordActivity, syncActivityInternal } from "@/server/activity";
+import { resolveInternal, resolveInternalUpdate } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { notifyEventCreated, notifyEventInvited } from "@/server/notifications";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
@@ -48,6 +49,8 @@ const eventInputSchema = z.object({
   inviteeIds: z.array(z.string().min(1).max(64)).max(200).optional(),
   /** Optional project, honoured on create only; empty / omitted = "Genel". */
   projectId: projectIdField,
+  /** "Yalnızca ekip": hidden from guests (ignored when a guest writes). Omitted = unchanged on update. */
+  internal: z.boolean().optional(),
 });
 
 export type EventInput = z.input<typeof eventInputSchema>;
@@ -108,14 +111,16 @@ export function normalizeEventInput(input: unknown) {
     recurrenceUntil,
     inviteeIds: v.inviteeIds,
     projectId: v.projectId,
+    internal: v.internal,
   };
 }
 
 /** The columns persisted on Event (normalizeEventInput minus the invitee list). */
 function eventColumns(data: ReturnType<typeof normalizeEventInput>) {
-  const { inviteeIds: _inviteeIds, projectId: _projectId, ...columns } = data;
+  const { inviteeIds: _inviteeIds, projectId: _projectId, internal: _internal, ...columns } = data;
   void _inviteeIds;
   void _projectId;
+  void _internal;
   return columns;
 }
 
@@ -208,7 +213,7 @@ export async function listMonth(ctx: TenantContext, month: string) {
 
   const [events, todos] = await Promise.all([
     db.event.findMany({
-      where: { workspaceId: ctx.workspaceId, deletedAt: null, ...overlapWhere(rangeStart, rangeEnd) },
+      where: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx), ...overlapWhere(rangeStart, rangeEnd) },
       orderBy: [{ startsAt: "asc" }, { title: "asc" }],
     }),
     // Read-only: todo due dates are @db.Date (stored as UTC midnight).
@@ -216,6 +221,7 @@ export async function listMonth(ctx: TenantContext, month: string) {
       where: {
         workspaceId: ctx.workspaceId,
         deletedAt: null,
+        list: { deletedAt: null, ...clientVisibleWhere(ctx) },
         dueDate: {
           gte: new Date(`${grid.firstKey}T00:00:00.000Z`),
           lte: new Date(`${grid.lastKey}T00:00:00.000Z`),
@@ -260,7 +266,7 @@ export async function listUpcomingEvents(
   const take = Math.min(Math.max(opts.take ?? 6, 1), 50);
   const now = opts.now ?? new Date();
   const until = istanbulDayEnd(addDaysToKey(istanbulDayKey(now), days));
-  const base = { workspaceId: ctx.workspaceId, deletedAt: null };
+  const base = { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) };
   const [plain, recurring] = await Promise.all([
     db.event.findMany({
       where: { ...base, recurrence: "NONE", endsAt: { gte: now }, startsAt: { lte: until } },
@@ -285,7 +291,9 @@ export async function listUpcomingEvents(
 }
 
 export async function getEvent(ctx: TenantContext, id: string): Promise<EventWithAccess> {
-  const event = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  const event = await db.event.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
+  });
   if (!event) throw notFound("Etkinlik bulunamadı.");
   return { ...event, canEdit: canModify(ctx, event.createdById) };
 }
@@ -294,7 +302,13 @@ export async function createEvent(ctx: TenantContext, input: unknown): Promise<E
   const parsed = normalizeEventInput(input);
   const projectId = await assertAssignableProject(ctx, parsed.projectId);
   const event = await db.event.create({
-    data: { ...eventColumns(parsed), projectId, workspaceId: ctx.workspaceId, createdById: ctx.userId },
+    data: {
+      ...eventColumns(parsed),
+      projectId,
+      internal: resolveInternal(ctx, parsed.internal),
+      workspaceId: ctx.workspaceId,
+      createdById: ctx.userId,
+    },
   });
   await autoSubscribe(ctx, { type: "event", id: event.id }, [ctx.userId]);
   const invited = parsed.inviteeIds ? await syncInvitees(ctx, event.id, parsed.inviteeIds) : [];
@@ -313,13 +327,20 @@ export async function createEvent(ctx: TenantContext, input: unknown): Promise<E
 export async function updateEvent(ctx: TenantContext, id: string, input: unknown): Promise<Event> {
   const parsed = normalizeEventInput(input);
   const data = eventColumns(parsed);
-  const existing = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  const existing = await db.event.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
+  });
   if (!existing) throw notFound("Etkinlik bulunamadı.");
   if (!canModify(ctx, existing.createdById)) {
     throw forbidden("Bu etkinliği yalnızca oluşturan kişi veya yöneticiler düzenleyebilir.");
   }
-  const res = await db.event.updateMany({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null }, data });
+  const internal = resolveInternalUpdate(ctx, parsed.internal);
+  const res = await db.event.updateMany({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
+    data: { ...data, ...(internal !== undefined ? { internal } : {}) },
+  });
   if (res.count === 0) throw notFound("Etkinlik bulunamadı.");
+  if (internal !== undefined && internal !== existing.internal) await syncActivityInternal(ctx, { type: "event", id });
   const event = await db.event.findFirstOrThrow({ where: { id, workspaceId: ctx.workspaceId } });
   if (parsed.inviteeIds) {
     const added = await syncInvitees(ctx, event.id, parsed.inviteeIds);
@@ -336,7 +357,9 @@ export async function updateEvent(ctx: TenantContext, id: string, input: unknown
 
 /** Moves the event to the trash (soft delete). */
 export async function deleteEvent(ctx: TenantContext, id: string): Promise<void> {
-  const existing = await db.event.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  const existing = await db.event.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
+  });
   if (!existing) throw notFound("Etkinlik bulunamadı.");
   if (!canModify(ctx, existing.createdById)) {
     throw forbidden("Bu etkinliği yalnızca oluşturan kişi veya yöneticiler silebilir.");
@@ -356,7 +379,7 @@ export const ICAL_FEED_MAX = 2000;
 /** All non-deleted events of the workspace (recurring ones once, with their RRULE data) for the iCal feed. */
 export async function listEventsForFeed(ctx: TenantContext) {
   return db.event.findMany({
-    where: { workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
     orderBy: [{ startsAt: "asc" }, { id: "asc" }],
     take: ICAL_FEED_MAX,
   });

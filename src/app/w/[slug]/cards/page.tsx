@@ -1,10 +1,11 @@
+import { notFound } from "next/navigation";
 import { Trash2 } from "lucide-react";
 
 import { ConfirmAction } from "@/components/confirm-action";
 import { PageHeader } from "@/components/page-header";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDueDate, todayDateOnly } from "@/lib/date-only";
-import { hasRole } from "@/lib/roles";
+import { hasRole, isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { listBoard } from "@/server/cards";
 import { listMemberUsers } from "@/server/workspaces";
@@ -17,6 +18,7 @@ export const metadata = { title: "Pano" };
 export default async function CardsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { ctx } = await requireWorkspace(slug);
+  if (isGuest(ctx.role)) notFound(); // team-only page
   const [columns, users] = await Promise.all([listBoard(ctx), listMemberUsers(ctx)]);
   const members = users.map((u) => ({ id: u.id, label: displayName(u) }));
   const isAdmin = hasRole(ctx.role, "ADMIN");

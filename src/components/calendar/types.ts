@@ -21,6 +21,8 @@ export type CalEvent = {
   startKey: string;
   endKey: string;
   canEdit: boolean;
+  /** Team-only ("Yalnızca ekip"): hidden from guests. */
+  internal: boolean;
   /** Comments on the event (one grouped count query on the page). */
   commentCount: number;
 };

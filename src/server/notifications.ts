@@ -15,6 +15,9 @@ import { notFound, parseInput, ServiceError } from "@/server/errors";
  * recipients that are current members of ctx.workspaceId (checked in the DB),
  * and never for the actor.
  *
+ * Team-only content: pass `internal: true` and guests are dropped from the
+ * recipients (a guest must never be told about an item they cannot open).
+ *
  * Reading: every read/update is scoped by userId = ctx.userId AND
  * workspaceId = ctx.workspaceId, so a user only ever sees or touches their
  * own notifications in the current workspace.
@@ -76,6 +79,8 @@ const notifySchema = z.object({
   title: z.string().trim().min(1).max(NOTIFICATION_TITLE_MAX),
   body: z.string().trim().max(NOTIFICATION_BODY_MAX).nullish(),
   path: z.string().refine(isValidNotificationPath, "Geçersiz bildirim yolu."),
+  /** Team-only ("Yalnızca ekip") content: never notify GUEST members. */
+  internal: z.boolean().optional(),
 });
 
 export type NotifyInput = z.input<typeof notifySchema>;
@@ -101,6 +106,7 @@ export async function notify(ctx: TenantContext, input: NotifyInput): Promise<nu
       const members = await tx.$queryRaw<Array<{ userId: string }>>`
         SELECT "userId" FROM "Membership"
         WHERE "workspaceId" = ${ctx.workspaceId} AND "userId" = ANY(${wanted}::text[])
+          AND (${data.internal !== true}::boolean OR role <> 'GUEST')
         FOR SHARE`;
       if (members.length === 0) return 0;
       // One batched lookup: recipients who muted this type in this workspace.
@@ -170,7 +176,7 @@ async function safely(where: string, fn: () => Promise<number>): Promise<number>
 /** A to-do was assigned (or reassigned) to `assigneeId`. */
 export function notifyTodoAssigned(
   ctx: TenantContext,
-  item: { id: string; title: string; assigneeId: string },
+  item: { id: string; title: string; assigneeId: string; internal?: boolean },
 ): Promise<number> {
   return safely("notifyTodoAssigned", async () => {
     if (item.assigneeId === ctx.userId) return 0;
@@ -181,6 +187,7 @@ export function notifyTodoAssigned(
       title: `${actor} size bir görev atadı`,
       body: clip(item.title, NOTIFICATION_BODY_MAX),
       path: "todos",
+      internal: item.internal,
     });
   });
 }
@@ -188,7 +195,7 @@ export function notifyTodoAssigned(
 /** A new message-board post: every other member. */
 export function notifyPostCreated(
   ctx: TenantContext,
-  post: { id: string; title: string },
+  post: { id: string; title: string; internal?: boolean },
 ): Promise<number> {
   return safely("notifyPostCreated", async () => {
     const [actor, ids] = await Promise.all([actorLabel(ctx), memberIds(ctx)]);
@@ -198,6 +205,7 @@ export function notifyPostCreated(
       title: `${actor} yeni bir mesaj paylaştı`,
       body: clip(post.title, NOTIFICATION_BODY_MAX),
       path: `messages/${post.id}`,
+      internal: post.internal,
     });
   });
 }
@@ -205,7 +213,7 @@ export function notifyPostCreated(
 /** A new comment: the post author plus everyone who commented on the post before. */
 export function notifyPostComment(
   ctx: TenantContext,
-  comment: { id: string; postId: string; postTitle: string; postAuthorId: string; body: string },
+  comment: { id: string; postId: string; postTitle: string; postAuthorId: string; body: string; internal?: boolean },
 ): Promise<number> {
   return safely("notifyPostComment", async () => {
     const [actor, earlier] = await Promise.all([
@@ -222,6 +230,7 @@ export function notifyPostComment(
       title: clip(`${actor} “${clip(comment.postTitle, 80)}” mesajına yorum yaptı`, NOTIFICATION_TITLE_MAX),
       body: clip(comment.body, 200),
       path: `messages/${comment.postId}`,
+      internal: comment.internal,
     });
   });
 }
@@ -229,7 +238,7 @@ export function notifyPostComment(
 /** A new calendar event: every other member. */
 export function notifyEventCreated(
   ctx: TenantContext,
-  event: { id: string; title: string; startsAt: Date },
+  event: { id: string; title: string; startsAt: Date; internal?: boolean },
   /** Members who get a more specific notification (e.g. EVENT_INVITE) instead. */
   excludeIds: string[] = [],
 ): Promise<number> {
@@ -244,6 +253,7 @@ export function notifyEventCreated(
       title: `${actor} yeni bir etkinlik ekledi`,
       body: clip(event.title, NOTIFICATION_BODY_MAX),
       path: `calendar?month=${dayKey.slice(0, 7)}#agenda-${dayKey}`,
+      internal: event.internal,
     });
   });
 }
@@ -251,7 +261,7 @@ export function notifyEventCreated(
 /** Members were invited to an event: only they are notified. */
 export function notifyEventInvited(
   ctx: TenantContext,
-  event: { id: string; title: string; startsAt: Date },
+  event: { id: string; title: string; startsAt: Date; internal?: boolean },
   inviteeIds: string[],
 ): Promise<number> {
   return safely("notifyEventInvited", async () => {
@@ -262,6 +272,7 @@ export function notifyEventInvited(
       title: `${actor} sizi bir etkinliğe davet etti`,
       body: clip(event.title, NOTIFICATION_BODY_MAX),
       path: `calendar/${event.id}`,
+      internal: event.internal,
     });
   });
 }

@@ -10,11 +10,12 @@ import { PostControls } from "@/components/messages/post-controls";
 import { Markdown } from "@/components/markdown";
 import { ReactionBar } from "@/components/reactions/reaction-bar";
 import { CategoryBadge } from "@/components/messages/category-badge";
+import { InternalBadge } from "@/components/internal-toggle";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDateTime, formatRelative } from "@/lib/format";
-import { canModify, hasRole } from "@/lib/roles";
+import { canModify, hasRole, isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { isServiceError } from "@/server/errors";
 import { listMentionCandidates, mentionNames } from "@/server/comments";
@@ -76,6 +77,7 @@ export default async function PostPage({
                 Taslak
               </Badge>
             ) : null}
+            {post.internal ? <InternalBadge className="mt-1 shrink-0" /> : null}
             {post.category ? <CategoryBadge category={post.category} className="mt-1 shrink-0" /> : null}
             {post.pinned ? (
               <Badge variant="secondary" className="mt-1 shrink-0">
@@ -105,7 +107,9 @@ export default async function PostPage({
             pinned: post.pinned,
             categoryId: post.categoryId,
             isDraft,
+            internal: post.internal,
           }}
+          canSetInternal={!isGuest(ctx.role)}
           canModify={canModify(ctx, post.authorId)}
           canPin={hasRole(ctx.role, "ADMIN")}
           members={members}

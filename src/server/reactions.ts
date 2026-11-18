@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import type { TenantContext } from "@/lib/tenant-context";
 import { notFound, parseInput } from "@/server/errors";
+import { commentClientWhere } from "@/server/client-visibility";
 import { visiblePostWhere } from "@/server/post-visibility";
 
 /**
@@ -47,7 +48,7 @@ async function requireSubject(ctx: TenantContext, input: unknown): Promise<React
     });
   } else {
     found = await db.comment.findFirst({
-      where: { id: s.id, workspaceId: ctx.workspaceId },
+      where: { id: s.id, workspaceId: ctx.workspaceId, ...commentClientWhere(ctx) },
       select: { id: true },
     });
   }

@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import {
   CalendarDays,
@@ -17,7 +18,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { TrashRowActions } from "@/components/trash/trash-row-actions";
 import { requireWorkspace } from "@/lib/tenant";
-import { hasRole } from "@/lib/roles";
+import { hasRole, isGuest } from "@/lib/roles";
 import { listTrash, TRASH_KIND_LABELS, TRASH_RETENTION_DAYS, type TrashKind } from "@/server/trash";
 
 export const metadata: Metadata = { title: "Çöp kutusu" };
@@ -37,6 +38,7 @@ const day = (d: Date) => format(d, "d MMMM yyyy", { locale: tr });
 export default async function TrashPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { ctx } = await requireWorkspace(slug);
+  if (isGuest(ctx.role)) notFound(); // team-only page
   const items = await listTrash(ctx);
   const admin = hasRole(ctx.role, "ADMIN");
 

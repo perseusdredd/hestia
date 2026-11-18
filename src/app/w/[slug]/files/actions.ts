@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { formString, toActionState, type ActionState } from "@/lib/action-state";
+import { formFlag, formString, toActionState, type ActionState } from "@/lib/action-state";
 import { requireWorkspace } from "@/lib/tenant";
 import { ServiceError } from "@/server/errors";
 import {
@@ -19,6 +19,7 @@ import {
   moveFolder,
   renameFile,
   renameFolder,
+  setFolderInternal,
   updateDocument,
   type PendingUpload,
 } from "@/server/files";
@@ -48,11 +49,24 @@ export async function createFolderAction(
       name: values.name,
       parentId: formString(formData, "parentId"),
       projectId: values.projectId,
+      internal: formFlag(formData, "internal"),
     });
     revalidate(slug);
     return { ok: true, message: "Klasör oluşturuldu." };
   } catch (e) {
     return { ...toActionState(e), values };
+  }
+}
+
+/** Switch a folder between "Yalnızca ekip" and visible to guests (called from the row menu). */
+export async function setFolderInternalAction(slug: string, id: string, internal: boolean): Promise<ActionState> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    await setFolderInternal(ctx, { id, internal });
+    revalidate(slug);
+    return { ok: true, message: internal ? "Klasör yalnızca ekibe açıldı." : "Klasör misafirlere açıldı." };
+  } catch (e) {
+    return toActionState(e);
   }
 }
 
@@ -174,7 +188,11 @@ export async function createDocumentAction(
   let id: string;
   try {
     const { ctx } = await requireWorkspace(slug);
-    const doc = await createDocument(ctx, { ...values, folderId: formString(formData, "folderId") });
+    const doc = await createDocument(ctx, {
+      ...values,
+      folderId: formString(formData, "folderId"),
+      internal: formFlag(formData, "internal"),
+    });
     id = doc.id;
     revalidate(slug);
   } catch (e) {
@@ -192,7 +210,7 @@ export async function updateDocumentAction(
   const id = formString(formData, "id");
   try {
     const { ctx } = await requireWorkspace(slug);
-    await updateDocument(ctx, { id, ...values });
+    await updateDocument(ctx, { id, ...values, internal: formFlag(formData, "internal") });
     revalidate(slug);
   } catch (e) {
     return { ...toActionState(e), values };

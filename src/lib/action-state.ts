@@ -46,3 +46,8 @@ export function formString(formData: FormData, key: string): string {
   const v = formData.get(key);
   return typeof v === "string" ? v : "";
 }
+
+/** Read a checkbox: true when the field was submitted (checked), false when missing. */
+export function formFlag(formData: FormData, key: string): boolean {
+  return formData.has(key);
+}

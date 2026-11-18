@@ -9,6 +9,7 @@ import type { CalDay, CalEvent, CalMember } from "@/components/calendar/types";
 import { PageHeader } from "@/components/page-header";
 import { buttonVariants } from "@/components/ui/button";
 import { displayName } from "@/components/user-avatar";
+import { isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { listMemberUsers } from "@/server/workspaces";
 import { listInviteeIdsByEvent, listMonth } from "@/server/calendar";
@@ -69,6 +70,7 @@ export default async function CalendarPage({
     startKey: istanbulDayKey(startsAt),
     endKey: istanbulDayKey(endsAt),
     canEdit: e.canEdit,
+    internal: e.internal,
     commentCount: commentCounts[e.id] ?? 0,
   }));
 
@@ -112,6 +114,7 @@ export default async function CalendarPage({
         events={calEvents}
         members={members}
         projects={projects}
+        canSetInternal={!isGuest(ctx.role)}
         todayKey={todayKey}
         defaultDayKey={defaultDayKey}
         toolbar={

@@ -7,6 +7,7 @@ import { CommentThread } from "@/components/comments/comment-thread";
 import { ConfirmAction } from "@/components/confirm-action";
 import { FilesBreadcrumbs } from "@/components/files/breadcrumbs";
 import { EmptyState } from "@/components/empty-state";
+import { InternalBadge } from "@/components/internal-toggle";
 import { Markdown } from "@/components/markdown";
 import { PageHeader } from "@/components/page-header";
 import { buttonVariants } from "@/components/ui/button";
@@ -42,7 +43,16 @@ export default async function DocumentPage({ params }: { params: Params }) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={document.title}
+        title={
+          document.internal ? (
+            <span className="inline-flex flex-wrap items-center gap-2">
+              {document.title}
+              <InternalBadge />
+            </span>
+          ) : (
+            document.title
+          )
+        }
         description={
           <span className="inline-flex flex-wrap items-center gap-1.5">
             <UserAvatar user={document.author} size="sm" />

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_TYPES } from "@/lib/pusher/chat-protocol";
-import { canModify, hasRole } from "@/lib/roles";
+import { canModify, clientVisibleWhere, hasRole } from "@/lib/roles";
 import {
   decodeTextPreview,
   generateStorageKey,
@@ -35,11 +35,26 @@ import {
   folderActivityPath,
   forgetActivity,
   recordActivity,
+  syncActivityInternal,
 } from "@/server/activity";
+import {
+  assertNotGuest,
+  documentClientWhere,
+  fileClientWhere,
+  resolveInternal,
+  resolveInternalUpdate,
+} from "@/server/client-visibility";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
 
 /*
+ * Client / guest visibility ("Yalnızca ekip"): folders and documents carry an
+ * `internal` flag; a file follows its folder. A GUEST only reaches rows that
+ * are not internal (findFolder / findFile / findDocument and every listing
+ * apply that), which also covers download and inline authorisation. A folder
+ * made internal cascades to its subfolders and documents, and anything created
+ * in or moved into an internal folder becomes internal.
+ *
  * Files & Docs service. Every ctx-first function scopes all reads and writes by
  * ctx.workspaceId. Exceptions (no ctx yet, they resolve it): authorizeFileAccess()
  * and acceptLocalUpload(), used by route handlers that only know a file id or a
@@ -96,6 +111,8 @@ const createFolderSchema = z.object({
   parentId: optionalFolderId,
   /** Optional project for a root folder; a subfolder always follows its parent. */
   projectId: projectIdField,
+  /** "Yalnızca ekip" (ignored for guests; a subfolder of an internal folder is always internal). */
+  internal: z.boolean().optional(),
 });
 const renameSchema = (name: z.ZodType<string>) => z.object({ id: idSchema, name });
 const moveSchema = z.object({ id: idSchema, targetFolderId: optionalFolderId });
@@ -113,8 +130,15 @@ const documentSchema = z.object({
   title: docTitleSchema,
   content: docContentSchema,
   folderId: optionalFolderId,
+  internal: z.boolean().optional(),
 });
-const updateDocumentSchema = z.object({ id: idSchema, title: docTitleSchema, content: docContentSchema });
+const updateDocumentSchema = z.object({
+  id: idSchema,
+  title: docTitleSchema,
+  content: docContentSchema,
+  internal: z.boolean().optional(),
+});
+const folderInternalSchema = z.object({ id: idSchema, internal: z.boolean() });
 
 // ------------------------------------------------------------ helpers ----
 
@@ -124,9 +148,20 @@ async function lockTree(tx: Tx, workspaceId: string) {
 }
 
 async function findFolder(client: Tx | typeof db, ctx: TenantContext, id: string) {
-  const folder = await client.folder.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  const folder = await client.folder.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
+  });
   if (!folder) throw notFound("Klasör bulunamadı.");
   return folder;
+}
+
+/** Marks a folder, its subfolders and the documents in them internal (a folder made team-only hides everything below it). */
+async function cascadeInternal(tx: Tx, ctx: TenantContext, folderId: string) {
+  const ids = [folderId, ...(await descendantFolders(tx, ctx, folderId)).map((d) => d.id)];
+  await tx.folder.updateMany({ where: { workspaceId: ctx.workspaceId, id: { in: ids } }, data: { internal: true } });
+  // Raw: updateMany would bump updatedAt, which is the "last edited" date.
+  await tx.$executeRaw`UPDATE "Document" SET internal = true
+    WHERE "workspaceId" = ${ctx.workspaceId} AND "folderId" = ANY(${ids}::text[]) AND internal = false`;
 }
 
 /** Ancestor chain root-first, ending with `folderId` itself. */
@@ -204,6 +239,7 @@ export type FolderListItem = {
   id: string;
   name: string;
   parentId: string | null;
+  internal: boolean;
   createdAt: Date;
   updatedAt: Date;
   createdById: string;
@@ -226,20 +262,21 @@ export async function listFolderContents(ctx: TenantContext, folderId: string | 
   const breadcrumbs = id ? (await ancestorChain(db, ctx, id)).map(({ id, name }) => ({ id, name })) : [];
   const where = { workspaceId: ctx.workspaceId, deletedAt: null, ...(id ? { folderId: id } : { folderId: null }) };
   // Chat photos are not part of the Files browser (documents have no such flag).
-  const fileWhere = { ...where, fromChat: false };
+  const fileWhere = { ...where, fromChat: false, ...fileClientWhere(ctx) };
+  const documentWhere = { ...where, ...documentClientWhere(ctx) };
 
   const [folderRows, files, documents] = await Promise.all([
     db.folder.findMany({
-      where: { workspaceId: ctx.workspaceId, parentId: id, deletedAt: null },
+      where: { workspaceId: ctx.workspaceId, parentId: id, deletedAt: null, ...clientVisibleWhere(ctx) },
       orderBy: [{ name: "asc" }, { id: "asc" }],
       take: FOLDER_ITEMS_MAX + 1,
       include: {
         createdBy: userSelect,
         _count: {
           select: {
-            children: { where: { deletedAt: null } },
-            files: { where: { deletedAt: null } },
-            documents: { where: { deletedAt: null } },
+            children: { where: { deletedAt: null, ...clientVisibleWhere(ctx) } },
+            files: { where: { deletedAt: null, ...fileClientWhere(ctx) } },
+            documents: { where: { deletedAt: null, ...documentClientWhere(ctx) } },
           },
         },
       },
@@ -251,12 +288,13 @@ export async function listFolderContents(ctx: TenantContext, folderId: string | 
       include: { uploadedBy: userSelect },
     }),
     db.document.findMany({
-      where,
+      where: documentWhere,
       orderBy: [{ title: "asc" }, { id: "asc" }],
       take: FOLDER_ITEMS_MAX + 1,
       select: {
         id: true,
         title: true,
+        internal: true,
         authorId: true,
         createdAt: true,
         updatedAt: true,
@@ -314,7 +352,7 @@ export async function listRecentItems(ctx: TenantContext, opts: { take?: number 
   const take = Math.min(Math.max(opts.take ?? 6, 1), 50);
   const [files, documents] = await Promise.all([
     db.file.findMany({
-      where: { workspaceId: ctx.workspaceId, fromChat: false, deletedAt: null },
+      where: { workspaceId: ctx.workspaceId, fromChat: false, deletedAt: null, ...fileClientWhere(ctx) },
       orderBy: { createdAt: "desc" },
       take,
       select: {
@@ -328,7 +366,7 @@ export async function listRecentItems(ctx: TenantContext, opts: { take?: number 
       },
     }),
     db.document.findMany({
-      where: { workspaceId: ctx.workspaceId, deletedAt: null },
+      where: { workspaceId: ctx.workspaceId, deletedAt: null, ...documentClientWhere(ctx) },
       orderBy: { updatedAt: "desc" },
       take,
       select: { id: true, title: true, folderId: true, updatedAt: true, author: userSelect },
@@ -360,7 +398,7 @@ export async function listRecentItems(ctx: TenantContext, opts: { take?: number 
 /** Every folder in the workspace (for move pickers). */
 export async function listFolderTree(ctx: TenantContext) {
   return db.folder.findMany({
-    where: { workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
     select: { id: true, name: true, parentId: true },
     orderBy: { name: "asc" },
   });
@@ -373,8 +411,11 @@ export async function createFolder(ctx: TenantContext, input: unknown) {
   const folder = await db.$transaction(async (tx) => {
     await lockTree(tx, ctx.workspaceId);
     let projectId: string | null = null;
+    let internal = resolveInternal(ctx, data.internal);
     if (data.parentId) {
-      projectId = (await findFolder(tx, ctx, data.parentId)).projectId;
+      const parent = await findFolder(tx, ctx, data.parentId);
+      projectId = parent.projectId;
+      internal = internal || parent.internal; // a subfolder of a team-only folder is team-only too
       const chain = await ancestorChain(tx, ctx, data.parentId);
       if (chain.length >= MAX_FOLDER_DEPTH) {
         throw new ServiceError("VALIDATION", "Klasörler en fazla 20 seviye iç içe olabilir.");
@@ -389,6 +430,7 @@ export async function createFolder(ctx: TenantContext, input: unknown) {
         parentId: data.parentId,
         createdById: ctx.userId,
         name: data.name,
+        internal,
       },
     });
   });
@@ -413,24 +455,45 @@ export async function renameFolder(ctx: TenantContext, input: unknown) {
 }
 
 /**
+ * Switch a folder between team-only and visible to guests. Same permission as
+ * renaming it (creator or ADMIN/OWNER); a guest never can. Making it internal
+ * cascades to its subfolders and documents.
+ */
+export async function setFolderInternal(ctx: TenantContext, input: unknown) {
+  assertNotGuest(ctx);
+  const data = parseInput(folderInternalSchema, input);
+  const folder = await db.$transaction(async (tx) => {
+    await lockTree(tx, ctx.workspaceId);
+    const found = await findFolder(tx, ctx, data.id);
+    if (!canModify(ctx, found.createdById)) throw forbidden();
+    if (data.internal) await cascadeInternal(tx, ctx, found.id);
+    else await tx.folder.update({ where: { id: found.id }, data: { internal: false } });
+    return found;
+  });
+  if (folder.internal !== data.internal) await syncActivityInternal(ctx, { type: "folder", id: folder.id });
+  return { ...folder, internal: data.internal };
+}
+
+/**
  * Move a folder under `targetFolderId` (null = root). The target must be in
  * the same workspace and must not be the folder itself or one of its
  * descendants (no cycles).
  */
 export async function moveFolder(ctx: TenantContext, input: unknown) {
   const data = parseInput(moveSchema, input);
-  return db.$transaction(async (tx) => {
+  const moved = await db.$transaction(async (tx) => {
     await lockTree(tx, ctx.workspaceId);
     const folder = await findFolder(tx, ctx, data.id);
     if (!canModify(ctx, folder.createdById)) throw forbidden();
     if (folder.parentId === data.targetFolderId) return folder;
 
     let targetDepth = 0;
+    let target: { internal: boolean } | null = null;
     if (data.targetFolderId) {
       if (data.targetFolderId === folder.id) {
         throw new ServiceError("VALIDATION", "Bir klasör kendi içine taşınamaz.");
       }
-      await findFolder(tx, ctx, data.targetFolderId);
+      target = await findFolder(tx, ctx, data.targetFolderId);
       const chain = await ancestorChain(tx, ctx, data.targetFolderId);
       if (chain.some((f) => f.id === folder.id)) {
         throw new ServiceError("VALIDATION", "Bir klasör kendi alt klasörlerinden birine taşınamaz.");
@@ -443,8 +506,14 @@ export async function moveFolder(ctx: TenantContext, input: unknown) {
       throw new ServiceError("VALIDATION", "Klasörler en fazla 20 seviye iç içe olabilir.");
     }
     await assertUniqueFolderName(tx, ctx, data.targetFolderId, folder.name, folder.id);
-    return tx.folder.update({ where: { id: folder.id }, data: { parentId: data.targetFolderId } });
+    const updated = await tx.folder.update({ where: { id: folder.id }, data: { parentId: data.targetFolderId } });
+    // Moved into a team-only folder: the whole subtree becomes team-only.
+    if (target?.internal && !folder.internal) await cascadeInternal(tx, ctx, folder.id);
+    return { updated, hidden: Boolean(target?.internal) && !folder.internal };
   });
+  if (!("updated" in moved)) return moved;
+  if (moved.hidden) await syncActivityInternal(ctx, { type: "folder", id: moved.updated.id });
+  return moved.updated;
 }
 
 /**
@@ -563,7 +632,9 @@ export async function restoreFolderTree(ctx: TenantContext, folderId: string) {
 // -------------------------------------------------------------- files ----
 
 async function findFile(client: Tx | typeof db, ctx: TenantContext, id: string) {
-  const file = await client.file.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  const file = await client.file.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...fileClientWhere(ctx) },
+  });
   if (!file) throw notFound("Dosya bulunamadı.");
   return file;
 }
@@ -711,7 +782,7 @@ export async function completeUpload(
       await lockTree(tx, ctx.workspaceId);
       if (p.f) {
         const folder = await tx.folder.findFirst({
-          where: { id: p.f, workspaceId: ctx.workspaceId, deletedAt: null },
+          where: { id: p.f, workspaceId: ctx.workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) },
           select: { id: true },
         });
         if (!folder) throw notFound("Hedef klasör artık mevcut değil.");
@@ -827,19 +898,22 @@ export async function renameFile(ctx: TenantContext, input: unknown) {
   return db.file.update({ where: { id: file.id }, data: { name: data.name } });
 }
 
+/** The destination folder (must exist and be visible to ctx); null for the root. */
 async function assertTargetFolder(tx: Tx, ctx: TenantContext, targetFolderId: string | null) {
-  if (targetFolderId) await findFolder(tx, ctx, targetFolderId);
+  return targetFolderId ? findFolder(tx, ctx, targetFolderId) : null;
 }
 
 export async function moveFile(ctx: TenantContext, input: unknown) {
   const data = parseInput(moveSchema, input);
-  return db.$transaction(async (tx) => {
+  const moved = await db.$transaction(async (tx) => {
     await lockTree(tx, ctx.workspaceId);
     const file = await findFile(tx, ctx, data.id);
     if (!canModify(ctx, file.uploadedById)) throw forbidden();
     await assertTargetFolder(tx, ctx, data.targetFolderId);
     return tx.file.update({ where: { id: file.id }, data: { folderId: data.targetFolderId } });
   });
+  await syncActivityInternal(ctx, { type: "file", id: moved.id }); // the file follows its new folder
+  return moved;
 }
 
 /** Moves the file to the trash (soft delete); the stored object stays until the trash is purged. */
@@ -1023,7 +1097,7 @@ export async function getFilePreview(
 ) {
   const id = parseInput(idSchema, fileId);
   const file = await db.file.findFirst({
-    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...fileClientWhere(ctx) },
     include: { uploadedBy: userSelect },
   });
   if (!file) throw notFound("Dosya bulunamadı.");
@@ -1048,7 +1122,9 @@ export async function getFilePreview(
 // ---------------------------------------------------------- documents ----
 
 async function findDocument(client: Tx | typeof db, ctx: TenantContext, id: string) {
-  const doc = await client.document.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  const doc = await client.document.findFirst({
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...documentClientWhere(ctx) },
+  });
   if (!doc) throw notFound("Doküman bulunamadı.");
   return doc;
 }
@@ -1057,7 +1133,7 @@ async function findDocument(client: Tx | typeof db, ctx: TenantContext, id: stri
 export async function getDocument(ctx: TenantContext, documentId: string) {
   const id = parseInput(idSchema, documentId);
   const doc = await db.document.findFirst({
-    where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...documentClientWhere(ctx) },
     include: { author: userSelect },
   });
   if (!doc) throw notFound("Doküman bulunamadı.");
@@ -1071,7 +1147,7 @@ export async function createDocument(ctx: TenantContext, input: unknown) {
   const data = parseInput(documentSchema, input);
   const doc = await db.$transaction(async (tx) => {
     await lockTree(tx, ctx.workspaceId);
-    await assertTargetFolder(tx, ctx, data.folderId);
+    const target = await assertTargetFolder(tx, ctx, data.folderId);
     return tx.document.create({
       data: {
         workspaceId: ctx.workspaceId,
@@ -1079,6 +1155,7 @@ export async function createDocument(ctx: TenantContext, input: unknown) {
         authorId: ctx.userId,
         title: data.title,
         content: data.content,
+        internal: resolveInternal(ctx, data.internal) || Boolean(target?.internal),
       },
     });
   });
@@ -1095,10 +1172,12 @@ export async function updateDocument(ctx: TenantContext, input: unknown) {
   const data = parseInput(updateDocumentSchema, input);
   const doc = await findDocument(db, ctx, data.id);
   if (!canModify(ctx, doc.authorId)) throw forbidden();
+  const internal = resolveInternalUpdate(ctx, data.internal);
   const updated = await db.document.update({
     where: { id: doc.id },
-    data: { title: data.title, content: data.content },
+    data: { title: data.title, content: data.content, ...(internal !== undefined ? { internal } : {}) },
   });
+  if (internal !== undefined && internal !== doc.internal) await syncActivityInternal(ctx, { type: "document", id: doc.id });
   await recordActivity(ctx, {
     type: "DOCUMENT_UPDATED",
     title: updated.title,
@@ -1110,13 +1189,19 @@ export async function updateDocument(ctx: TenantContext, input: unknown) {
 
 export async function moveDocument(ctx: TenantContext, input: unknown) {
   const data = parseInput(moveSchema, input);
-  return db.$transaction(async (tx) => {
+  const moved = await db.$transaction(async (tx) => {
     await lockTree(tx, ctx.workspaceId);
     const doc = await findDocument(tx, ctx, data.id);
     if (!canModify(ctx, doc.authorId)) throw forbidden();
-    await assertTargetFolder(tx, ctx, data.targetFolderId);
-    return tx.document.update({ where: { id: doc.id }, data: { folderId: data.targetFolderId } });
+    const target = await assertTargetFolder(tx, ctx, data.targetFolderId);
+    // Moved into a team-only folder: the document becomes team-only.
+    return tx.document.update({
+      where: { id: doc.id },
+      data: { folderId: data.targetFolderId, ...(target?.internal ? { internal: true } : {}) },
+    });
   });
+  await syncActivityInternal(ctx, { type: "document", id: moved.id });
+  return moved;
 }
 
 /** Moves the document to the trash (soft delete). */

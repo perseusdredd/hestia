@@ -8,12 +8,13 @@ import { FileDropZone, FileUploader, UploadProvider } from "@/components/files/f
 import { ItemActions, type ActionItem } from "@/components/files/item-actions";
 import { NewFolderDialog } from "@/components/files/new-folder-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { InternalBadge } from "@/components/internal-toggle";
 import { PageHeader } from "@/components/page-header";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDate } from "@/lib/format";
-import { canModify } from "@/lib/roles";
+import { canModify, isGuest } from "@/lib/roles";
 import { thumbnailEligible } from "@/lib/storage/inline";
 import type { TenantContext } from "@/lib/tenant-context";
 import { FOLDER_ITEMS_MAX, listFolderContents, listFolderTree } from "@/server/files";
@@ -33,6 +34,8 @@ type Row = {
   person: Person;
   date: Date;
   ownerId: string;
+  /** Team-only folder or document: shows the "Ekip içi" badge. */
+  internal?: boolean;
 };
 
 function Rows({ slug, ctx, rows, folders }: {
@@ -47,9 +50,12 @@ function Rows({ slug, ctx, rows, folders }: {
         <li key={r.key} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
           {r.icon}
           <div className="min-w-0 flex-1">
-            <Link href={r.href} className="block truncate text-sm font-medium hover:underline">
-              {r.item.name}
-            </Link>
+            <div className="flex min-w-0 items-center gap-2">
+              <Link href={r.href} className="block min-w-0 truncate text-sm font-medium hover:underline">
+                {r.item.name}
+              </Link>
+              {r.internal ? <InternalBadge className="shrink-0" /> : null}
+            </div>
             <p className="truncate text-xs text-muted-foreground">
               {r.meta}
               <span className="sm:hidden">
@@ -69,7 +75,13 @@ function Rows({ slug, ctx, rows, folders }: {
             {formatDate(r.date, "d MMM yyyy")}
           </time>
           <div className="flex w-7 shrink-0 justify-end pointer-coarse:w-10">
-            <ItemActions slug={slug} item={r.item} canModify={canModify(ctx, r.ownerId)} folders={folders} />
+            <ItemActions
+              slug={slug}
+              item={r.item}
+              canModify={canModify(ctx, r.ownerId)}
+              canSetInternal={!isGuest(ctx.role)}
+              folders={folders}
+            />
           </div>
         </li>
       ))}
@@ -87,7 +99,8 @@ export async function FolderView({ slug, ctx, folderId }: { slug: string; ctx: T
   const rows: Row[] = [
     ...folders.map<Row>((f) => ({
       key: `folder-${f.id}`,
-      item: { kind: "folder", id: f.id, name: f.name, locationId: f.parentId },
+      item: { kind: "folder", id: f.id, name: f.name, locationId: f.parentId, internal: f.internal },
+      internal: f.internal,
       href: folderHref(slug, f.id),
       icon: <ItemIcon kind="folder" />,
       meta: f.itemCount === 0 ? "Klasör · boş" : `Klasör · ${f.itemCount} öğe`,
@@ -97,7 +110,8 @@ export async function FolderView({ slug, ctx, folderId }: { slug: string; ctx: T
     })),
     ...documents.map<Row>((d) => ({
       key: `doc-${d.id}`,
-      item: { kind: "document", id: d.id, name: d.title, locationId: d.folderId },
+      item: { kind: "document", id: d.id, name: d.title, locationId: d.folderId, internal: d.internal },
+      internal: d.internal,
       href: documentHref(slug, d.id),
       icon: <ItemIcon kind="document" />,
       meta: "Doküman",
@@ -137,13 +151,20 @@ export async function FolderView({ slug, ctx, folderId }: { slug: string; ctx: T
               {folder && folderEditable ? (
                 <ItemActions
                   slug={slug}
-                  item={{ kind: "folder", id: folder.id, name: folder.name, locationId: folder.parentId }}
+                  item={{
+                    kind: "folder",
+                    id: folder.id,
+                    name: folder.name,
+                    locationId: folder.parentId,
+                    internal: folder.internal,
+                  }}
+                  canSetInternal={!isGuest(ctx.role)}
                   canModify
                   folders={tree}
                   current
                 />
               ) : null}
-              <NewFolderDialog slug={slug} parentId={currentId} projects={projects} />
+              <NewFolderDialog slug={slug} parentId={currentId} projects={projects} canSetInternal={!isGuest(ctx.role)} />
               <Link href={newDocumentHref(slug, currentId)} className={buttonVariants({ variant: "outline" })}>
                 <FilePlus2 aria-hidden />
                 Yeni doküman

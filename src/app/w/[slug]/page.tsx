@@ -28,6 +28,7 @@ import { formatDueDate, todayDateOnly } from "@/lib/date-only";
 import { eventWhen } from "@/lib/event-labels";
 import { formatDate, formatRelative } from "@/lib/format";
 import { istanbulDayKey } from "@/lib/istanbul-time";
+import { isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { cn } from "@/lib/utils";
 import { listActivity } from "@/server/activity";
@@ -155,10 +156,12 @@ export default async function WorkspaceOverview({
           </span>
         }
         actions={
-          <Link href={href("chat")} className={buttonVariants({ variant: "outline" })}>
-            <MessagesSquare aria-hidden />
-            Sohbete git
-          </Link>
+          isGuest(ctx.role) ? undefined : (
+            <Link href={href("chat")} className={buttonVariants({ variant: "outline" })}>
+              <MessagesSquare aria-hidden />
+              Sohbete git
+            </Link>
+          )
         }
       />
 

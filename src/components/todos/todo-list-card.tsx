@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import type { TodoListDTO, TodoSectionDTO, TodoUser } from "@/server/todos";
 
 import { HillChart } from "./hill-chart";
+import { InternalBadge } from "@/components/internal-toggle";
 import { EditListButton } from "./list-dialogs";
 import { AddSectionForm, SectionHeader } from "./section-controls";
 import { TodoItemRow } from "./todo-item-row";
@@ -39,9 +40,12 @@ export function TodoListCard({
   isFirst,
   isLast,
   commentCounts = {},
+  canSetInternal = false,
 }: {
   slug: string;
   list: TodoListDTO;
+  /** Shows the "Yalnızca ekip" toggle in the edit dialog (not for guests). */
+  canSetInternal?: boolean;
   members: TodoUser[];
   today: string;
   /** Hide the add form (e.g. while the "assigned to me" filter is on). */
@@ -158,7 +162,10 @@ export function TodoListCard({
       <div className="space-y-3 border-b px-4 pt-3.5 pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 pt-0.5">
-            <h2 className="break-words text-section-title">{list.name}</h2>
+            <h2 className="flex flex-wrap items-center gap-2 break-words text-section-title">
+              {list.name}
+              {list.internal ? <InternalBadge /> : null}
+            </h2>
             {list.description ? (
               <p className="mt-0.5 whitespace-pre-line text-sm text-muted-foreground">
                 {list.description}
@@ -193,7 +200,7 @@ export function TodoListCard({
                   </Button>
                 </>
               ) : null}
-              <EditListButton slug={slug} list={list} />
+              <EditListButton slug={slug} list={list} canSetInternal={canSetInternal} />
               <ConfirmAction
                 action={deleteListAction.bind(null, slug)}
                 fields={{ id: list.id }}

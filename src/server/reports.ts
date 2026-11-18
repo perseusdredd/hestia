@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { addDaysToKey } from "@/lib/istanbul-time";
 import type { TenantContext } from "@/lib/tenant-context";
 import { listUpcomingEvents, type EventWithAccess } from "@/server/calendar";
+import { assertNotGuest } from "@/server/client-visibility";
 import { ServiceError } from "@/server/errors";
 
 /** "Raporlar": read-only, workspace-scoped aggregation. Soft-deleted rows are always excluded. */
@@ -45,6 +46,7 @@ export function groupOverdueByAssignee(items: ReportTodo[]): OverdueGroup[] {
 }
 
 export async function getReports(ctx: TenantContext, opts: { today?: string; now?: Date } = {}): Promise<Reports> {
+  assertNotGuest(ctx, "Raporlar yalnızca ekibe açıktır.");
   const today = opts.today ?? todayDateOnly(opts.now);
   if (!isDateOnly(today)) throw new ServiceError("VALIDATION", "Geçersiz tarih.");
   const open = { workspaceId: ctx.workspaceId, status: "OPEN" as const, deletedAt: null };

@@ -11,8 +11,9 @@ import {
   type ChatCursor,
   type ChatMessageDTO,
 } from "@/lib/pusher/chat-protocol";
-import { canModify } from "@/lib/roles";
+import { canModify, isGuest } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
+import { assertNotGuest } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import type { StorageDriver } from "@/lib/storage";
 import { hardDeleteFile } from "@/server/files";
@@ -101,7 +102,12 @@ function roomFilter(ctx: TenantContext, peerId?: string | null): Prisma.ChatMess
   };
 }
 
-/** A DM peer must be another current member of the workspace. */
+/** The chat is team-only: a guest gets FORBIDDEN from every chat service call. */
+function assertChatAccess(ctx: TenantContext): void {
+  assertNotGuest(ctx, "Sohbet yalnızca ekibe açıktır.");
+}
+
+/** A DM peer must be another current member (not a guest) of the workspace. */
 async function assertPeer(ctx: TenantContext, peerId?: string | null): Promise<void> {
   if (!peerId) return;
   if (typeof peerId !== "string" || peerId.length > 64 || peerId === ctx.userId) {
@@ -109,9 +115,10 @@ async function assertPeer(ctx: TenantContext, peerId?: string | null): Promise<v
   }
   const m = await db.membership.findUnique({
     where: { userId_workspaceId: { userId: peerId, workspaceId: ctx.workspaceId } },
-    select: { id: true },
+    select: { id: true, role: true },
   });
-  if (!m) throw notFound("Üye bulunamadı.");
+  // Guests are not in the chat: nobody can DM them either.
+  if (!m || isGuest(m.role)) throw notFound("Üye bulunamadı.");
 }
 
 const NEWEST_FIRST = [{ createdAt: "desc" }, { id: "desc" }] satisfies Prisma.ChatMessageOrderByWithRelationInput[];
@@ -133,6 +140,7 @@ export async function listMessages(
   ctx: TenantContext,
   input: { before?: string; limit?: number; peer?: string } = {},
 ): Promise<{ messages: ChatMessageDTO[]; hasMore: boolean }> {
+  assertChatAccess(ctx);
   const { before, limit = CHAT_PAGE_SIZE, peer } = parseInput(listSchema, input);
   await assertPeer(ctx, peer);
   const where: Prisma.ChatMessageWhereInput = {
@@ -172,6 +180,7 @@ export async function listMessagesAfterPage(
   ctx: TenantContext,
   input: { after: string; limit?: number; peer?: string },
 ): Promise<{ messages: ChatMessageDTO[]; hasMoreAfter: boolean }> {
+  assertChatAccess(ctx);
   const { after, limit = 100, peer } = parseInput(afterSchema, input);
   await assertPeer(ctx, peer);
   const rows = await db.chatMessage.findMany({
@@ -194,6 +203,7 @@ export async function listLiveIdsFrom(
   from: string,
   peer?: string,
 ): Promise<{ ids: string[]; complete: boolean }> {
+  assertChatAccess(ctx);
   const c = cursorOrThrow(from);
   await assertPeer(ctx, peer);
   const rows = await db.chatMessage.findMany({
@@ -215,6 +225,7 @@ export async function listLiveIdsFrom(
 
 /** One message of this workspace (NOT_FOUND for other workspaces' ids). */
 export async function getMessage(ctx: TenantContext, id: string): Promise<ChatMessageDTO> {
+  assertChatAccess(ctx);
   if (typeof id !== "string" || id.length === 0 || id.length > 64) throw notFound("Mesaj bulunamadı.");
   const row = await db.chatMessage.findFirst({
     where: {
@@ -310,6 +321,7 @@ export async function createMessage(ctx: TenantContext, input: CreateInput): Pro
 
 /** createMessage plus whether a row was actually inserted. */
 export async function createMessageIdempotent(ctx: TenantContext, input: CreateInput): Promise<SendResult> {
+  assertChatAccess(ctx);
   const { body, clientId, fileId, peerId } = parseInput(createSchema, input);
   const actor = await loadActor(ctx);
   await assertPeer(ctx, peerId);
@@ -387,6 +399,7 @@ export async function sendRateLimitedMessage(ctx: TenantContext, input: CreateIn
  * (workspaceId, authorId, clientId) is the backstop if anything bypasses it.
  */
 export async function sendChatMessage(ctx: TenantContext, input: CreateInput): Promise<SendResult> {
+  assertChatAccess(ctx);
   const { body, clientId, fileId, peerId } = parseInput(createSchema, input);
   await assertPeer(ctx, peerId);
   try {
@@ -433,6 +446,7 @@ export async function deleteMessage(
   id: string,
   storage?: StorageDriver,
 ): Promise<{ id: string }> {
+  assertChatAccess(ctx);
   if (typeof id !== "string" || id.length === 0 || id.length > 64) throw notFound("Mesaj bulunamadı.");
   const actor = await loadActor(ctx);
   const msg = await db.chatMessage.findFirst({
@@ -483,9 +497,10 @@ export async function authorizeChatChannel(
   if (!workspaceId) return { allow: false, reason: "MALFORMED_CHANNEL" };
   const membership = await db.membership.findUnique({
     where: { userId_workspaceId: { userId, workspaceId } },
-    select: { id: true },
+    select: { id: true, role: true },
   });
-  if (!membership) return { allow: false, reason: "NOT_A_MEMBER" };
+  // Guests never join the chat channel.
+  if (!membership || isGuest(membership.role)) return { allow: false, reason: "NOT_A_MEMBER" };
   return { allow: true, workspaceId };
 }
 
@@ -504,9 +519,10 @@ export type ConversationDTO = {
 
 /** The other members as DM partners, most recent conversation first. */
 export async function listConversations(ctx: TenantContext): Promise<ConversationDTO[]> {
+  assertChatAccess(ctx);
   const [members, recent, unread] = await Promise.all([
     db.membership.findMany({
-      where: { workspaceId: ctx.workspaceId, userId: { not: ctx.userId } },
+      where: { workspaceId: ctx.workspaceId, userId: { not: ctx.userId }, role: { not: "GUEST" } },
       select: { user: { select: authorSelect } },
     }),
     db.chatMessage.findMany({
@@ -547,6 +563,7 @@ export async function listConversations(ctx: TenantContext): Promise<Conversatio
 
 /** The peer's public profile, for the conversation header (null if not a member). */
 export async function getPeer(ctx: TenantContext, peerId: string) {
+  assertChatAccess(ctx);
   await assertPeer(ctx, peerId);
   return db.user.findUnique({ where: { id: peerId }, select: authorSelect });
 }

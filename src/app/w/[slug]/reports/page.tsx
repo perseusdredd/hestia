@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, BarChart3, CalendarDays, CheckSquare, Users, type LucideIcon } from "lucide-react";
 
@@ -8,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDueDate, todayDateOnly } from "@/lib/date-only";
 import { eventWhen } from "@/lib/event-labels";
 import { istanbulDayKey } from "@/lib/istanbul-time";
+import { isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { getReports, REPORT_DUE_DAYS, REPORT_EVENT_DAYS, type ReportTodo } from "@/server/reports";
 
@@ -48,6 +50,7 @@ function TodoRow({ t, href, showAssignee }: { t: ReportTodo; href: string; showA
 export default async function ReportsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { ctx } = await requireWorkspace(slug);
+  if (isGuest(ctx.role)) notFound(); // team-only page
   const r = await getReports(ctx, { today: todayDateOnly() });
   const href = (segment: string) => workspaceHref(slug, segment);
 

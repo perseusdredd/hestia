@@ -1,9 +1,11 @@
 "use client";
 
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { Download, FolderInput, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Download, FolderInput, Lock, LockOpen, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useRef } from "react";
+import { toast } from "sonner";
 
+import { setFolderInternalAction } from "@/app/w/[slug]/files/actions";
 import { documentHref, downloadHref } from "@/app/w/[slug]/files/paths";
 import { type DeferredMenuProps, useFocusOnMount } from "@/components/deferred-menu";
 import { itemMenuLabel, type ItemMenuProps } from "@/components/files/item-actions";
@@ -18,7 +20,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /** A file, document or folder's "..." menu; loaded after hydration (see DeferredMenu). */
-export function ItemMenu({ slug, item, canModify, current, onDialog, defaultOpen, autoFocus }: ItemMenuProps & DeferredMenuProps) {
+export function ItemMenu({
+  slug,
+  item,
+  canModify,
+  current,
+  onDialog,
+  canSetInternal,
+  defaultOpen,
+  autoFocus,
+}: ItemMenuProps & DeferredMenuProps) {
   const trigger = useRef<HTMLButtonElement>(null);
   useFocusOnMount(trigger, autoFocus);
   return (
@@ -57,6 +68,18 @@ export function ItemMenu({ slug, item, canModify, current, onDialog, defaultOpen
           <DropdownMenuItem onClick={() => onDialog("rename")}>
             <Pencil aria-hidden />
             Yeniden adlandır
+          </DropdownMenuItem>
+        ) : null}
+        {canModify && canSetInternal && item.kind === "folder" ? (
+          <DropdownMenuItem
+            onClick={async () => {
+              const res = await setFolderInternalAction(slug, item.id, !item.internal);
+              if (res.ok) toast.success(res.message);
+              else toast.error(res.error ?? "İşlem yapılamadı.");
+            }}
+          >
+            {item.internal ? <LockOpen aria-hidden /> : <Lock aria-hidden />}
+            {item.internal ? "Misafirlere aç" : "Yalnızca ekip yap"}
           </DropdownMenuItem>
         ) : null}
         {canModify ? (
