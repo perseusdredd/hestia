@@ -7,6 +7,7 @@ import { CommentThread } from "@/components/comments/comment-thread";
 import { SubscribeToggle } from "@/components/subscriptions/subscribe-toggle";
 import { PostControls } from "@/components/messages/post-controls";
 import { Markdown } from "@/components/markdown";
+import { ReactionBar } from "@/components/reactions/reaction-bar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { displayName, UserAvatar } from "@/components/user-avatar";
@@ -16,6 +17,7 @@ import { requireWorkspace } from "@/lib/tenant";
 import { isServiceError } from "@/server/errors";
 import { listMentionCandidates, mentionNames } from "@/server/comments";
 import { getPostHeader } from "@/server/messages";
+import { listReactions, REACTION_EMOJIS } from "@/server/reactions";
 import { isSubscribed, countSubscribers } from "@/server/subscriptions";
 
 export const metadata: Metadata = { title: "Mesaj" };
@@ -38,11 +40,12 @@ export default async function PostPage({
   }
 
   const subject = { type: "post" as const, id: post.id };
-  const [members, names, subscribed, subscribers] = await Promise.all([
+  const [members, names, subscribed, subscribers, reactions] = await Promise.all([
     listMentionCandidates(ctx),
     mentionNames(ctx, [post.body]),
     isSubscribed(ctx, subject),
     countSubscribers(ctx, subject),
+    listReactions(ctx, "post", [post.id]),
   ]);
   const edited = post.updatedAt.getTime() - post.createdAt.getTime() > 1000;
 
@@ -89,6 +92,13 @@ export default async function PostPage({
         >
           <Markdown text={post.body} className="text-base" mentions={names} />
         </PostControls>
+
+        <ReactionBar
+          slug={slug}
+          subject={{ type: "post", id: post.id }}
+          reactions={reactions[post.id] ?? []}
+          allowed={REACTION_EMOJIS}
+        />
 
         <SubscribeToggle slug={slug} subject={subject} subscribed={subscribed} count={subscribers} />
       </article>

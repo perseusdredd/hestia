@@ -3,6 +3,7 @@ import { MessageSquare } from "lucide-react";
 import { CommentForm } from "@/components/comments/comment-form";
 import { CommentItem } from "@/components/comments/comment-item";
 import { Markdown } from "@/components/markdown";
+import { ReactionBar } from "@/components/reactions/reaction-bar";
 import { canModify } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import {
@@ -13,6 +14,7 @@ import {
   mentionNames,
   type CommentSubject,
 } from "@/server/comments";
+import { listReactions, REACTION_EMOJIS } from "@/server/reactions";
 
 /**
  * Comments on one subject (post, to-do, document or event) with the form to
@@ -31,6 +33,11 @@ export async function CommentThread({
   className?: string;
 }) {
   const [comments, members] = await Promise.all([listComments(ctx, subject), listMentionCandidates(ctx)]);
+  const reactions = await listReactions(
+    ctx,
+    "comment",
+    comments.map((c) => c.id),
+  );
   // Only a capped thread needs the real total.
   const [names, total] = await Promise.all([
     mentionNames(
@@ -74,6 +81,12 @@ export async function CommentThread({
               }}
             >
               <Markdown text={c.body} mentions={names} />
+              <ReactionBar
+                slug={slug}
+                subject={{ type: "comment", id: c.id }}
+                reactions={reactions[c.id] ?? []}
+                allowed={REACTION_EMOJIS}
+              />
             </CommentItem>
           ))}
         </ul>

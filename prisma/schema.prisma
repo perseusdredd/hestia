@@ -47,6 +47,7 @@ model User {
   authTokens         AuthToken[]
   activities         Activity[]
   subscriptions      Subscription[]
+  reactions          Reaction[]
 }
 
 model Account {
@@ -118,6 +119,7 @@ model Workspace {
   notifications Notification[]
   activities    Activity[]
   subscriptions Subscription[]
+  reactions     Reaction[]
 }
 
 model Membership {
@@ -444,6 +446,25 @@ model Subscription {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, subjectType, subjectId])
+  @@index([workspaceId, subjectType, subjectId])
+}
+
+// Boosts: emoji reactions on posts and comments. subjectType is "post" |
+// "comment"; polymorphic like Subscription (no FK), so the service validates
+// the subject inside the workspace and deleteComment removes its reactions.
+model Reaction {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  subjectType String
+  subjectId   String
+  emoji       String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, subjectType, subjectId, emoji])
   @@index([workspaceId, subjectType, subjectId])
 }
 

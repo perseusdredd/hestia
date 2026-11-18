@@ -468,6 +468,9 @@ export async function deleteComment(ctx: TenantContext, commentId: string): Prom
   if (!canModify(ctx, comment.authorId)) throw forbidden("Bu yorumu silme yetkiniz yok.");
   await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "comment", id: comment.id }], tx);
+    await tx.reaction.deleteMany({
+      where: { workspaceId: ctx.workspaceId, subjectType: "comment", subjectId: comment.id },
+    });
     await tx.comment.deleteMany({ where: { id: comment.id, workspaceId: ctx.workspaceId } });
   });
   return { subject: { type: subject.type, id: subject.id } };
