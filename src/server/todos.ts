@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { canModify, clientVisibleWhere, isGuest } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, recordActivity, recordTodoToggled, syncActivityInternal } from "@/server/activity";
-import { resolveInternal, resolveInternalUpdate, todoItemClientWhere } from "@/server/client-visibility";
+import { assertNotGuest, resolveInternal, resolveInternalUpdate, todoItemClientWhere } from "@/server/client-visibility";
 import { conflict, forbidden, notFound, ServiceError, parseInput } from "@/server/errors";
 import { notifyTodoAssigned } from "@/server/notifications";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
@@ -772,6 +772,7 @@ export async function moveTodoItem(ctx: TenantContext, id: string, input: unknow
 
 /** Moves a list one step up/down among the workspace's lists. Same permission as editing the list. */
 export async function moveTodoList(ctx: TenantContext, id: string, direction: unknown) {
+  assertNotGuest(ctx); // reordering touches every list's position, including team-only ones
   const dir = parseInput(directionSchema, direction);
   const list = await getList(ctx, id);
   if (!canModify(ctx, list.createdById)) throw forbidden();

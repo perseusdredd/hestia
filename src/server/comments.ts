@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { MAX_MENTIONS, mentionsToPlain, parseMentionIds } from "@/lib/mentions";
-import { canModify, clientVisibleWhere } from "@/lib/roles";
+import { canModify, clientVisibleWhere, isGuest } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, recordActivity } from "@/server/activity";
 import { documentClientWhere } from "@/server/client-visibility";
@@ -243,6 +243,8 @@ export async function mentionNames(ctx: TenantContext, bodies: string[]): Promis
 export async function listMentionCandidates(
   ctx: TenantContext,
 ): Promise<Array<{ id: string; name: string; email: string; image: string | null }>> {
+  // A guest/client must not be handed the team roster (names + emails) via the @ picker.
+  if (isGuest(ctx.role)) return [];
   const rows = await db.membership.findMany({
     where: { workspaceId: ctx.workspaceId, userId: { not: ctx.userId } },
     select: { user: { select: { id: true, name: true, email: true, image: true } } },

@@ -53,7 +53,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
   try {
     overview = await getProjectOverview(ctx, decodeURIComponent(projectSlug));
   } catch (e) {
-    if (isServiceError(e) && e.code === "NOT_FOUND") notFound();
+    // A malformed %-escape in the slug throws URIError — treat it as not found, not a 500.
+    if (e instanceof URIError || (isServiceError(e) && e.code === "NOT_FOUND")) notFound();
     throw e;
   }
   const { project, posts, todoLists, folders, events, counts } = overview;

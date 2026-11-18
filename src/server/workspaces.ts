@@ -7,7 +7,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { appLink } from "@/lib/mail/origin";
 import { inviteEmail } from "@/lib/mail/templates";
-import { hasRole, ROLE_LABELS } from "@/lib/roles";
+import { hasRole, isGuest, ROLE_LABELS } from "@/lib/roles";
 import { getStorage, keyBelongsToWorkspace, type StorageDriver } from "@/lib/storage";
 import { isReservedSlug, SLUG_MAX, SLUG_MIN, SLUG_PATTERN } from "@/lib/slug";
 import type { TenantContext } from "@/lib/tenant-context";
@@ -251,6 +251,8 @@ export async function listMembers(ctx: TenantContext) {
 
 /** Members as {id, name, email, image} - handy for assignee pickers. */
 export async function listMemberUsers(ctx: TenantContext) {
+  // The assignee picker must not expose the team roster to a guest/client.
+  if (isGuest(ctx.role)) return [];
   const members = await listMembers(ctx);
   return members.map((m) => m.user);
 }

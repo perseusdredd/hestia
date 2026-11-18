@@ -695,6 +695,7 @@ export async function createChatImageUpload(
   input: unknown,
   storage: StorageDriver = getStorage(),
 ): Promise<PendingUpload> {
+  assertNotGuest(ctx); // the workspace chat is team-only; guests get no upload token
   const data = parseInput(chatImageUploadSchema, input);
   const mimeType = normalizeMimeType(data.type);
   if (!(CHAT_IMAGE_TYPES as readonly string[]).includes(mimeType)) {

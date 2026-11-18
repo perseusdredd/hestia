@@ -16,19 +16,21 @@ import { createColumn, listBoard } from "@/server/cards";
 import { listCheckins } from "@/server/checkins";
 import { listMessages as listChatMessages, sendChatMessage, listConversations } from "@/server/chat";
 import { documentClientWhere, fileClientWhere, resolveInternal, todoItemClientWhere } from "@/server/client-visibility";
-import { listComments } from "@/server/comments";
+import { listComments, listMentionCandidates } from "@/server/comments";
 import { ServiceError } from "@/server/errors";
 import {
   acceptInvitation,
   changeMemberRole,
   createInvitation,
   createInviteLink,
+  listMemberUsers,
   renameWorkspace,
 } from "@/server/workspaces";
 import {
   acceptLocalUpload,
   authorizeFileAccess,
   completeUpload,
+  createChatImageUpload,
   createDocument,
   createFolder,
   createPendingUpload,
@@ -68,6 +70,7 @@ import {
   getTodoItemDetail,
   listMyOpenTodos,
   listTodoLists,
+  moveTodoList,
   setTodoItemDone,
   updateTodoItem,
   updateTodoList,
@@ -801,5 +804,23 @@ describe("workspace isolation", () => {
   it("a guest of one workspace gets nothing from another", async () => {
     const foreign = await createPost(otherOwner, { title: `${TOKEN} baska`, body: "b" });
     await expect(getPostHeader(guest, foreign.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("guest boundary (follow-up fixes)", () => {
+  it("a guest cannot reorder to-do lists or get a chat upload token", async () => {
+    const list = await createTodoList(member, { name: `${TOKEN} siralama` });
+    expect(await code(moveTodoList(guest, list.id, "up"))).toBe("FORBIDDEN");
+    expect(await code(createChatImageUpload(guest, { name: "a.png", size: 10, type: "image/png" }))).toBe("FORBIDDEN");
+    // A member is unaffected.
+    expect(await code(createChatImageUpload(member, { name: "a.png", size: 10, type: "image/png" }))).toBe("OK");
+  });
+
+  it("the member pickers do not expose the team roster to a guest", async () => {
+    expect(await listMentionCandidates(guest)).toEqual([]);
+    expect(await listMemberUsers(guest)).toEqual([]);
+    // Members still see the roster.
+    expect((await listMentionCandidates(member)).length).toBeGreaterThan(0);
+    expect((await listMemberUsers(member)).length).toBeGreaterThan(0);
   });
 });
