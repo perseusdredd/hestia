@@ -17,21 +17,27 @@ export async function publishDueScheduled(now: Date): Promise<number> {
   let published = 0;
   for (const row of due) {
     try {
+      const membership = await db.membership.findFirst({
+        where: { workspaceId: row.workspaceId, userId: row.authorId },
+        select: { role: true },
+      });
+      if (!membership) {
+        // Author was removed from the workspace: never publish or announce in their name.
+        // Demote to a plain draft so the cron stops retrying it.
+        await db.post.updateMany({
+          where: { id: row.id, publishedAt: null, deletedAt: null, scheduledFor: { not: null, lte: now } },
+          data: { scheduledFor: null },
+        });
+        continue;
+      }
       const res = await db.post.updateMany({
         where: { id: row.id, publishedAt: null, deletedAt: null, scheduledFor: { not: null, lte: now } },
         data: { publishedAt: now, createdAt: now, updatedAt: now, scheduledFor: null },
       });
       if (res.count === 0) continue; // someone else published / cancelled it
       published++;
-      const [post, membership] = await Promise.all([
-        db.post.findUniqueOrThrow({ where: { id: row.id } }),
-        db.membership.findFirst({
-          where: { workspaceId: row.workspaceId, userId: row.authorId },
-          select: { role: true },
-        }),
-      ]);
-      // If the author left the workspace the post is still published, announced as a member action.
-      const ctx = { userId: row.authorId, workspaceId: row.workspaceId, role: membership?.role ?? "MEMBER" } as const;
+      const post = await db.post.findUniqueOrThrow({ where: { id: row.id } });
+      const ctx = { userId: row.authorId, workspaceId: row.workspaceId, role: membership.role } as const;
       await announcePost(ctx, post);
     } catch (e) {
       console.error("[scheduled-posts] failed for", row.id, e);

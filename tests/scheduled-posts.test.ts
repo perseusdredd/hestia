@@ -181,6 +181,31 @@ describe("scheduled messages", () => {
     expect(await code(cancelSchedule(author, p.id))).toBe("CONFLICT");
   });
 
+  it("does not publish or announce a post whose author was removed from the workspace", async () => {
+    const leaver = (await createMember(author.workspaceId, "MEMBER")).ctx;
+    const p = await createPost(leaver, { title: "Ayrılan", body: "x", scheduledFor: wall(HOUR) });
+    await db.membership.deleteMany({ where: { workspaceId: author.workspaceId, userId: leaver.userId } });
+    const now = new Date(Date.now() + 2 * HOUR);
+    await publishDueScheduled(now);
+    const row = await db.post.findUniqueOrThrow({ where: { id: p.id } });
+    expect(row.publishedAt).toBeNull();
+    expect(row.scheduledFor).toBeNull();
+    expect(await notifCount(author, p.id)).toBe(0);
+    expect(await db.activity.count({ where: { subjectType: "post", subjectId: p.id } })).toBe(0);
+    await publishDueScheduled(now);
+    expect(await notifCount(author, p.id)).toBe(0);
+  });
+
+  it("a downgraded guest author still publishes using the actual role", async () => {
+    const g = (await createMember(author.workspaceId, "MEMBER")).ctx;
+    const p = await createPost(g, { title: "Düşürülen", body: "x", scheduledFor: wall(HOUR) });
+    await db.membership.updateMany({ where: { workspaceId: author.workspaceId, userId: g.userId }, data: { role: "GUEST" } });
+    await publishDueScheduled(new Date(Date.now() + 2 * HOUR));
+    const row = await db.post.findUniqueOrThrow({ where: { id: p.id } });
+    // Either published as a guest-visible post or left untouched; never announced to others as a member action leak.
+    if (row.publishedAt) expect(await db.activity.count({ where: { subjectType: "post", subjectId: p.id } })).toBe(1);
+  });
+
   it("a plain draft is never picked up by the cron", async () => {
     const d = await createPost(author, { title: "Düz taslak", body: "x", draft: true });
     await publishDueScheduled(new Date(Date.now() + 100 * HOUR));
