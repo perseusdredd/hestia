@@ -1,10 +1,11 @@
 "use client";
 
 import { useActionState, useCallback, useEffect, useState } from "react";
-import { Pencil, Pin, PinOff, Send, Trash2 } from "lucide-react";
+import { CalendarX, Pencil, Pin, PinOff, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
+  cancelScheduleAction,
   deletePostAction,
   publishPostAction,
   togglePinAction,
@@ -35,6 +36,27 @@ function PinButton({ slug, postId, pinned }: { slug: string; postId: string; pin
       <Button type="submit" variant="outline" size="sm" disabled={pending} aria-busy={pending}>
         {pinned ? <PinOff aria-hidden /> : <Pin aria-hidden />}
         {pinned ? "Sabitlemeyi kaldır" : "Sabitle"}
+      </Button>
+    </form>
+  );
+}
+
+function CancelScheduleButton({ slug, postId }: { slug: string; postId: string }) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(
+    cancelScheduleAction.bind(null, slug),
+    {},
+  );
+  useEffect(() => {
+    if (state.ok && state.message) toast.success(state.message);
+    else if (state.error) toast.error(state.error);
+  }, [state]);
+
+  return (
+    <form action={action}>
+      <input type="hidden" name="id" value={postId} />
+      <Button type="submit" variant="outline" size="sm" disabled={pending} aria-busy={pending}>
+        <CalendarX aria-hidden />
+        Zamanlamayı iptal et
       </Button>
     </form>
   );
@@ -85,6 +107,8 @@ export function PostControls({
     categoryId: string | null;
     isDraft: boolean;
     internal?: boolean;
+    /** Istanbul wall time "YYYY-MM-DDTHH:mm" while scheduled. */
+    scheduledFor?: string;
   };
   canModify: boolean;
   canPin: boolean;
@@ -122,6 +146,7 @@ export function PostControls({
       {canModify || canPin ? (
         <div className="flex flex-wrap items-center gap-2">
           {post.isDraft && canModify ? <PublishButton slug={slug} postId={post.id} /> : null}
+          {post.isDraft && post.scheduledFor && canModify ? <CancelScheduleButton slug={slug} postId={post.id} /> : null}
           {canPin ? <PinButton slug={slug} postId={post.id} pinned={post.pinned} /> : null}
           {canModify ? (
             <>

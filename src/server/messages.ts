@@ -20,6 +20,7 @@ import {
 import { notify } from "@/server/notifications";
 import { visiblePostWhere } from "@/server/post-visibility";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
+import { parseIstanbulLocal } from "@/lib/istanbul-time";
 
 const idSchema = z.string().min(1).max(64);
 
@@ -41,7 +42,25 @@ const createPostSchema = postSchema.extend({
   draft: z.boolean().optional(),
   /** Optional project; empty / omitted = "Genel". Only chosen at creation. */
   projectId: projectIdField,
+  /** Istanbul wall time "YYYY-MM-DDTHH:mm": the post stays a draft and publishes at that time. */
+  scheduledFor: z.string().max(32).nullish(),
 });
+
+const WALL_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+/** Parses a schedule time (Istanbul wall time) and requires it to be in the future. */
+export function parseFutureSchedule(value: string, now: Date = new Date()): Date {
+  const date = WALL_TIME.test(value.trim()) ? parseIstanbulLocal(value.trim()) : null;
+  if (!date) {
+    throw new ServiceError("VALIDATION", "Geçerli bir zaman seçin.", { scheduledFor: ["Geçerli bir zaman seçin."] });
+  }
+  if (date.getTime() <= now.getTime()) {
+    throw new ServiceError("VALIDATION", "Zamanlama ileri bir tarih olmalı.", {
+      scheduledFor: ["Zamanlama ileri bir tarih olmalı."],
+    });
+  }
+  return date;
+}
 
 /** The category must belong to the workspace. */
 async function assertCategory(ctx: TenantContext, categoryId: string | null | undefined) {
@@ -68,6 +87,8 @@ export type PostListItem = {
   internal: boolean;
   /** Not published yet; only the author sees it. */
   isDraft: boolean;
+  /** Draft that publishes automatically at this time (author-only until then). */
+  scheduledFor: Date | null;
   category: { id: string; name: string; emoji: string } | null;
   createdAt: Date;
   updatedAt: Date;
@@ -159,6 +180,7 @@ export async function listPosts(
     pinned: p.pinned,
     internal: p.internal,
     isDraft: p.publishedAt === null,
+    scheduledFor: p.publishedAt === null ? p.scheduledFor : null,
     category: p.category,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
@@ -204,7 +226,9 @@ export async function getPost(ctx: TenantContext, postId: string) {
 }
 
 export async function createPost(ctx: TenantContext, input: unknown) {
-  const { draft, projectId, internal, ...data } = parseInput(createPostSchema, input);
+  const { draft: wantsDraft, projectId, internal, scheduledFor: scheduledRaw, ...data } = parseInput(createPostSchema, input);
+  const scheduledFor = scheduledRaw?.trim() ? parseFutureSchedule(scheduledRaw) : null;
+  const draft = Boolean(wantsDraft) || scheduledFor !== null;
   await assertCategory(ctx, data.categoryId);
   const assignedProjectId = await assertAssignableProject(ctx, projectId);
   const post = await db.post.create({
@@ -216,6 +240,7 @@ export async function createPost(ctx: TenantContext, input: unknown) {
       workspaceId: ctx.workspaceId,
       authorId: ctx.userId,
       publishedAt: draft ? null : new Date(),
+      scheduledFor,
     },
   });
   // A draft announces nothing; that happens once, in publishPost.
@@ -224,7 +249,7 @@ export async function createPost(ctx: TenantContext, input: unknown) {
 }
 
 /** Subscribe the author, notify members and record the activity row. Runs once per post, at publish time. */
-async function announcePost(ctx: TenantContext, post: { id: string; title: string; body: string; internal: boolean }) {
+export async function announcePost(ctx: TenantContext, post: { id: string; title: string; body: string; internal: boolean }) {
   await autoSubscribe(ctx, { type: "post", id: post.id }, [ctx.userId]);
   await notifyNewPost(ctx, post); // after the main write; never throws
   await recordActivity(ctx, {
@@ -247,11 +272,35 @@ export async function publishPost(ctx: TenantContext, postId: string) {
   const now = new Date();
   const res = await db.post.updateMany({
     where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null, publishedAt: null },
-    data: { publishedAt: now, createdAt: now, updatedAt: now },
+    data: { publishedAt: now, createdAt: now, updatedAt: now, scheduledFor: null },
   });
   if (res.count === 0) throw conflict("Bu gönderi zaten yayınlanmış.");
   await announcePost(ctx, post);
-  return { ...post, publishedAt: now, createdAt: now, updatedAt: now };
+  return { ...post, publishedAt: now, createdAt: now, updatedAt: now, scheduledFor: null };
+}
+
+/** Schedules (or reschedules) the caller's own unpublished post. Keeps updatedAt. */
+export async function schedulePost(ctx: TenantContext, postId: string, scheduledFor: string) {
+  const post = await findPostInWorkspace(ctx, postId);
+  if (post.authorId !== ctx.userId) throw forbidden("Taslağı yalnızca yazarı zamanlayabilir.");
+  const at = parseFutureSchedule(typeof scheduledFor === "string" ? scheduledFor : "");
+  const res = await db.post.updateMany({
+    where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null, publishedAt: null },
+    data: { scheduledFor: at, updatedAt: post.updatedAt },
+  });
+  if (res.count === 0) throw conflict("Bu gönderi zaten yayınlanmış.");
+  return at;
+}
+
+/** Cancels a schedule: the post goes back to a plain draft. */
+export async function cancelSchedule(ctx: TenantContext, postId: string) {
+  const post = await findPostInWorkspace(ctx, postId);
+  if (post.authorId !== ctx.userId) throw forbidden("Zamanlamayı yalnızca yazarı iptal edebilir.");
+  const res = await db.post.updateMany({
+    where: { id: post.id, workspaceId: ctx.workspaceId, deletedAt: null, publishedAt: null },
+    data: { scheduledFor: null, updatedAt: post.updatedAt },
+  });
+  if (res.count === 0) throw conflict("Bu gönderi zaten yayınlanmış.");
 }
 
 function clip(text: string, max: number): string {

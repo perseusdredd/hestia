@@ -201,6 +201,8 @@ model Post {
   deletedById String?
   // Draft: publishedAt is null (visible only to the author). Rows created without it count as published.
   publishedAt DateTime? @default(now())
+  // Scheduled: publishedAt null + scheduledFor set = publishes automatically at that time (cron). Both null = plain draft.
+  scheduledFor DateTime?
   categoryId  String?
   // Optional project (null = "Genel", workspace-level).
   projectId   String?
@@ -217,6 +219,7 @@ model Post {
   @@index([workspaceId, deletedAt])
   @@index([workspaceId, categoryId])
   @@index([workspaceId, projectId])
+  @@index([scheduledFor])
 }
 
 model MessageCategory {

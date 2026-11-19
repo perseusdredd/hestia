@@ -5,7 +5,7 @@ import { InternalBadge } from "@/components/internal-toggle";
 import { Badge } from "@/components/ui/badge";
 import { CategoryBadge } from "@/components/messages/category-badge";
 import { displayName, UserAvatar } from "@/components/user-avatar";
-import { formatRelative } from "@/lib/format";
+import { formatDateTime, formatRelative } from "@/lib/format";
 import type { PostListItem } from "@/server/messages";
 
 /** One row in the message board list. Pure markup, usable from server or client components. */
@@ -22,7 +22,7 @@ export function PostCard({ slug, post }: { slug: string; post: PostListItem }) {
             <h2 className="min-w-0 flex-1 truncate font-medium">{post.title}</h2>
             {post.isDraft ? (
               <Badge variant="outline" className="shrink-0">
-                Taslak
+                {post.scheduledFor ? `Zamanlanmış: ${formatDateTime(post.scheduledFor)}` : "Taslak"}
               </Badge>
             ) : null}
             {post.internal ? <InternalBadge className="shrink-0" /> : null}

@@ -33,7 +33,7 @@ export function PostForm({
   canSetInternal = false,
 }: {
   action: Action;
-  post?: { id: string; title: string; body: string; categoryId?: string | null; isDraft?: boolean; internal?: boolean };
+  post?: { id: string; title: string; body: string; categoryId?: string | null; isDraft?: boolean; internal?: boolean; scheduledFor?: string };
   submitLabel: string;
   onDone?: () => void;
   cancel?: React.ReactNode;
@@ -129,6 +129,23 @@ export function PostForm({
         />
         <FieldError errors={state.fieldErrors?.body} />
       </div>
+      {!post || isDraft ? (
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${idPrefix}-schedule`}>Zamanla (isteğe bağlı)</Label>
+          <Input
+            id={`${idPrefix}-schedule`}
+            name="scheduledFor"
+            type="datetime-local"
+            className="max-w-xs"
+            defaultValue={state.values?.scheduledFor ?? post?.scheduledFor ?? ""}
+            aria-invalid={Boolean(state.fieldErrors?.scheduledFor) || undefined}
+          />
+          <p className="text-xs text-muted-foreground">
+            Bir zaman seçip &quot;Zamanla&quot;ya basın; gönderi o zamanda otomatik yayınlanır. O zamana kadar yalnızca siz görürsünüz.
+          </p>
+          <FieldError errors={state.fieldErrors?.scheduledFor} />
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {post && !isDraft ? (
           <SubmitButton pending={pending} pendingText="Kaydediliyor">
@@ -138,6 +155,9 @@ export function PostForm({
           <>
             <SubmitButton pending={pending} pendingText="Kaydediliyor" name="intent" value="publish">
               Yayınla
+            </SubmitButton>
+            <SubmitButton pending={pending} pendingText="Kaydediliyor" name="intent" value="schedule" variant="outline">
+              Zamanla
             </SubmitButton>
             <SubmitButton
               pending={pending}

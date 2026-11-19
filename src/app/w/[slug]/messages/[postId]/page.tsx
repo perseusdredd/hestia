@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDateTime, formatRelative } from "@/lib/format";
+import { toIstanbulInputValue } from "@/lib/istanbul-time";
 import { canModify, hasRole, isGuest } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { isServiceError } from "@/server/errors";
@@ -74,7 +75,7 @@ export default async function PostPage({
             </h1>
             {isDraft ? (
               <Badge variant="outline" className="mt-1 shrink-0">
-                Taslak
+                {post.scheduledFor ? `Zamanlanmış: ${formatDateTime(post.scheduledFor)}` : "Taslak"}
               </Badge>
             ) : null}
             {post.internal ? <InternalBadge className="mt-1 shrink-0" /> : null}
@@ -108,6 +109,7 @@ export default async function PostPage({
             categoryId: post.categoryId,
             isDraft,
             internal: post.internal,
+            scheduledFor: post.scheduledFor ? toIstanbulInputValue(post.scheduledFor, true) : undefined,
           }}
           canSetInternal={!isGuest(ctx.role)}
           canModify={canModify(ctx, post.authorId)}
