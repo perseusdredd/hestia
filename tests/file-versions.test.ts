@@ -158,6 +158,30 @@ describe("new version", () => {
     expect(await db.fileVersion.count({ where: { fileId: file.id } })).toBe(0);
   });
 
+  it("replaying a consumed upload/version token never deletes bytes kept in version history", async () => {
+    const bytes1 = new TextEncoder().encode("one");
+    const p1 = await createPendingUpload(memberA, { name: "replay.txt", size: 3, type: "text/plain" }, storage);
+    await acceptLocalUpload(memberA.userId, p1.token, bytes1, 3, storage);
+    const file = await completeUpload(memberA, p1.token, storage);
+    const { token: t2 } = await newVersion(memberA, file.id, "two");
+    const { token: t3 } = await newVersion(memberA, file.id, "three");
+
+    // original upload token replayed: key k1 is now FileVersion 1
+    await expect(completeUpload(memberA, p1.token, storage)).rejects.toMatchObject({ code: "CONFLICT" });
+    // version token for k2 replayed: key k2 is now FileVersion 2
+    await expect(completeVersionUpload(memberA, t2, storage)).rejects.toMatchObject({ code: "CONFLICT" });
+    // current token is still an idempotent success
+    expect((await completeVersionUpload(memberA, t3, storage)).id).toBe(file.id);
+
+    const versions = await listFileVersions(memberA, file.id);
+    expect(versions.map((v) => v.version)).toEqual([3, 2, 1]);
+    for (const v of versions.filter((x) => x.id)) {
+      const { download } = await getFileVersionDownload(memberA, file.id, v.id!, storage);
+      expect(download.kind).toBe("stream");
+      if (download.kind === "stream") expect(await readAll(download.stream)).toBe(v.version === 1 ? "one" : "two");
+    }
+  });
+
   it("rejects a size mismatch and keeps the file untouched", async () => {
     const file = await upload(memberA, "size.txt", "abc");
     const pending = await createVersionUpload(memberA, { fileId: file.id, size: 10, type: "text/plain" }, storage);

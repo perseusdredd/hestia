@@ -759,7 +759,14 @@ const KEY_USED_MESSAGE = "Bu yükleme oturumu zaten kullanıldı. Dosyayı yenid
 
 /** The key was consumed but its File row is gone (deleted): refuse and drop the replayed bytes. */
 async function rejectConsumedKey(storage: StorageDriver, ctx: TenantContext, key: string): Promise<never> {
-  if (keyBelongsToWorkspace(key, ctx.workspaceId)) await deleteObjects(storage, [key]);
+  if (keyBelongsToWorkspace(key, ctx.workspaceId)) {
+    // The bytes may be live: rotated into version history, or another file's current bytes.
+    const [version, file] = await Promise.all([
+      db.fileVersion.findUnique({ where: { storageKey: key }, select: { id: true } }),
+      db.file.findUnique({ where: { storageKey: key }, select: { id: true } }),
+    ]);
+    if (!version && !file) await deleteObjects(storage, [key]);
+  }
   throw new ServiceError("CONFLICT", KEY_USED_MESSAGE);
 }
 
