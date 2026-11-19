@@ -191,19 +191,25 @@ const COMMENT_SUBJECT_LABELS: Record<CommentSubjectType, string> = {
   todo: "Görev",
   document: "Doküman",
   event: "Etkinlik",
+  file: "Dosya",
 };
 
 type SubjectRef = { id: string; title: string; workspaceId: string } | null;
 
 /** The comment's subject (only when it is in `workspaceId`), with its title. */
 function commentSearchSubject(
-  r: { post: SubjectRef; todoItem: SubjectRef; document: SubjectRef; event: SubjectRef },
+  r: { post: SubjectRef; todoItem: SubjectRef; document: SubjectRef; event: SubjectRef; file: { id: string; name: string; workspaceId: string } | null },
   workspaceId: string,
 ): (CommentSubject & { title: string }) | null {
   const pick = (type: CommentSubjectType, ref: SubjectRef) =>
     ref && ref.workspaceId === workspaceId ? { type, id: ref.id, title: ref.title } : null;
+  const file = r.file ? { id: r.file.id, title: r.file.name, workspaceId: r.file.workspaceId } : null;
   return (
-    pick("post", r.post) ?? pick("todo", r.todoItem) ?? pick("document", r.document) ?? pick("event", r.event)
+    pick("post", r.post) ??
+    pick("todo", r.todoItem) ??
+    pick("document", r.document) ??
+    pick("event", r.event) ??
+    pick("file", file)
   );
 }
 
@@ -256,6 +262,7 @@ export async function searchWorkspace(
                 { todoItem: { workspaceId, deletedAt: null, list: { deletedAt: null, ...clientVisibleWhere(ctx) } } },
                 { document: { workspaceId, deletedAt: null, ...documentClientWhere(ctx) } },
                 { event: { workspaceId, deletedAt: null, ...clientVisibleWhere(ctx) } },
+                { file: { workspaceId, deletedAt: null, ...fileClientWhere(ctx) } },
               ],
             },
             { OR: anyFieldContains<Prisma.CommentWhereInput>(["body"], variants) },
@@ -272,6 +279,7 @@ export async function searchWorkspace(
           todoItem: { select: { id: true, title: true, workspaceId: true } },
           document: { select: { id: true, title: true, workspaceId: true } },
           event: { select: { id: true, title: true, workspaceId: true } },
+          file: { select: { id: true, name: true, workspaceId: true } },
         },
       });
       return rows.flatMap((r): SearchResult[] => {

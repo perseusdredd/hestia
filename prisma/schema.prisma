@@ -247,6 +247,7 @@ model Comment {
   todoItemId  String?
   documentId  String?
   eventId     String?
+  fileId      String?
   authorId    String
   body        String   @db.Text
   createdAt   DateTime @default(now())
@@ -257,12 +258,14 @@ model Comment {
   todoItem  TodoItem? @relation(fields: [todoItemId], references: [id], onDelete: Cascade)
   document  Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
   event     Event?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  file      File?     @relation(fields: [fileId], references: [id], onDelete: Cascade)
   author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   @@index([postId, createdAt])
   @@index([todoItemId, createdAt])
   @@index([documentId, createdAt])
   @@index([eventId, createdAt])
+  @@index([fileId, createdAt])
   @@index([workspaceId])
 }
 
@@ -447,6 +450,7 @@ model File {
   uploadedBy  User         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
   chatMessage ChatMessage?
   versions    FileVersion[]
+  comments    Comment[]
 
   @@index([workspaceId, folderId])
   @@index([workspaceId, deletedAt])

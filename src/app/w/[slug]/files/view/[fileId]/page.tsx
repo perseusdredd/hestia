@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, Download } from "lucide-react";
 
+import { CommentThread } from "@/components/comments/comment-thread";
 import { FilesBreadcrumbs } from "@/components/files/breadcrumbs";
 import { FileVersions } from "@/components/files/file-versions";
 import { ItemActions } from "@/components/files/item-actions";
@@ -112,6 +113,7 @@ function PreviewBody({ preview, fileId, name, mimeType }: {
 
 export default async function FileViewPage({ params }: { params: Params }) {
   const { slug, fileId } = await params;
+  const { ctx } = await requireWorkspace(slug);
   const { file, breadcrumbs, preview, versions, tree, mayModify } = await load(slug, fileId);
   const kind = fileKind(file.mimeType, file.name);
   const parentHref = folderHref(slug, file.folderId);
@@ -207,6 +209,7 @@ export default async function FileViewPage({ params }: { params: Params }) {
           </CardContent>
         </Card>
       </div>
+      <CommentThread slug={slug} ctx={ctx} subject={{ type: "file", id: file.id }} />
     </div>
   );
 }

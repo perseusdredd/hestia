@@ -36,7 +36,7 @@ async function code(p: Promise<unknown>): Promise<string> {
   return "OK";
 }
 
-const TYPES: CommentSubjectType[] = ["post", "todo", "document", "event"];
+const TYPES: CommentSubjectType[] = ["post", "todo", "document", "event", "file"];
 
 /** One subject of each type in ctx's workspace, created by `by` (to-do assigned to `assignee`). */
 async function seedSubjects(ctx: TenantContext, by: string, assignee?: string) {
@@ -58,7 +58,18 @@ async function seedSubjects(ctx: TenantContext, by: string, assignee?: string) {
       endsAt: new Date("2026-03-10T10:00:00Z"),
     },
   });
+  const file = await db.file.create({
+    data: {
+      workspaceId: ws,
+      uploadedById: by,
+      name: "rapor.pdf",
+      mimeType: "application/pdf",
+      size: 10,
+      storageKey: `${ws}/${uniqueSuffix()}-rapor.pdf`,
+    },
+  });
   return {
+    file: { type: "file", id: file.id },
     post: { type: "post", id: post.id },
     todo: { type: "todo", id: todo.id },
     document: { type: "document", id: document.id },
@@ -123,7 +134,7 @@ describe("comments service", () => {
         const c = await addComment(alice, A[type], { body: "tek anahtar" });
         expect(c.workspaceId).toBe(owner.workspaceId);
         expect(c.authorId).toBe(alice.userId);
-        const keys = [c.postId, c.todoItemId, c.documentId, c.eventId].filter(Boolean);
+        const keys = [c.postId, c.todoItemId, c.documentId, c.eventId, c.fileId].filter(Boolean);
         expect(keys).toEqual([A[type].id]);
         const listed = await listComments(bob, A[type]);
         expect(listed.some((x) => x.id === c.id)).toBe(true);
@@ -136,7 +147,7 @@ describe("comments service", () => {
     });
 
     it("validates subject and body", async () => {
-      expect(await code(addComment(alice, { type: "file" as CommentSubjectType, id: A.post.id }, { body: "x" }))).toBe(
+      expect(await code(addComment(alice, { type: "folder" as CommentSubjectType, id: A.post.id }, { body: "x" }))).toBe(
         "VALIDATION",
       );
       expect(await code(addComment(alice, { type: "post", id: "x".repeat(65) }, { body: "x" }))).toBe("VALIDATION");
@@ -370,19 +381,20 @@ describe("comments service", () => {
       expect(await code(getTodoItemDetail(owner, "x".repeat(65)))).toBe("VALIDATION");
     });
 
-    it("search links comment results to the right subject for all four types", async () => {
+    it("search links comment results to the right subject for all five types", async () => {
       const marker = `qz${uniqueSuffix()}`;
       for (const type of TYPES) await addComment(alice, A[type], { body: `${type} ${marker}` });
       await addComment(otherOwner, B.post, { body: `B ${marker}` });
       const res = await searchWorkspace(owner, { q: marker, types: ["comment"], limitPerType: 10 });
       const items = res.groups[0].items;
-      expect(items).toHaveLength(4);
+      expect(items).toHaveLength(TYPES.length);
       const paths = items.map((i) => i.path).sort();
       expect(paths).toEqual(TYPES.map((t) => commentSubjectPath(A[t])).sort());
       expect(paths).toContain(`messages/${A.post.id}`);
       expect(paths).toContain(`todos/${A.todo.id}`);
       expect(paths).toContain(`files/docs/${A.document.id}`);
       expect(paths).toContain(`calendar/${A.event.id}`);
+      expect(paths).toContain(`files/view/${A.file.id}`);
       const todoHit = items.find((i) => i.path === `todos/${A.todo.id}`);
       expect(todoHit?.title.text).toBe("Teklif hazırla");
     });

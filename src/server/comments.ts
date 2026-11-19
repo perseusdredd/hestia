@@ -6,7 +6,7 @@ import { MAX_MENTIONS, mentionsToPlain, parseMentionIds } from "@/lib/mentions";
 import { canModify, clientVisibleWhere, isGuest } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, recordActivity } from "@/server/activity";
-import { documentClientWhere } from "@/server/client-visibility";
+import { documentClientWhere, fileClientWhere } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput } from "@/server/errors";
 import { visiblePostWhere } from "@/server/post-visibility";
 import {
@@ -29,10 +29,10 @@ import { autoSubscribe, ensureSubscribers, listSubscriberIds } from "@/server/su
  * Permissions: any member comments; authors edit/delete their own comments;
  * ADMIN/OWNER anything. A GUEST can comment on (and read) the subjects it can
  * see, i.e. everything that is not internal ("Yalnızca ekip"): a to-do follows
- * its list, a document its own flag and folder.
+ * its list, a document its own flag and folder, a file its folder.
  */
 
-export const COMMENT_SUBJECT_TYPES = ["post", "todo", "document", "event"] as const;
+export const COMMENT_SUBJECT_TYPES = ["post", "todo", "document", "event", "file"] as const;
 export type CommentSubjectType = (typeof COMMENT_SUBJECT_TYPES)[number];
 export type CommentSubject = { type: CommentSubjectType; id: string };
 
@@ -68,6 +68,8 @@ export function commentSubjectPath(subject: CommentSubject): string {
       return `files/docs/${subject.id}`;
     case "event":
       return `calendar/${subject.id}`;
+    case "file":
+      return `files/view/${subject.id}`;
   }
 }
 
@@ -77,11 +79,13 @@ export function commentSubjectOf(row: {
   todoItemId: string | null;
   documentId: string | null;
   eventId: string | null;
+  fileId: string | null;
 }): CommentSubject | null {
   if (row.postId) return { type: "post", id: row.postId };
   if (row.todoItemId) return { type: "todo", id: row.todoItemId };
   if (row.documentId) return { type: "document", id: row.documentId };
   if (row.eventId) return { type: "event", id: row.eventId };
+  if (row.fileId) return { type: "file", id: row.fileId };
   return null;
 }
 
@@ -96,6 +100,8 @@ function subjectKey(subject: CommentSubject) {
       return { documentId: subject.id };
     case "event":
       return { eventId: subject.id };
+    case "file":
+      return { fileId: subject.id };
   }
 }
 
@@ -109,6 +115,8 @@ function subjectKeyIn(type: CommentSubjectType, ids: string[]): Prisma.CommentWh
       return { documentId: { in: ids } };
     case "event":
       return { eventId: { in: ids } };
+    case "file":
+      return { fileId: { in: ids } };
   }
 }
 
@@ -127,6 +135,7 @@ const NOT_FOUND_MESSAGES: Record<CommentSubjectType, string> = {
   todo: "Görev bulunamadı.",
   document: "Doküman bulunamadı.",
   event: "Etkinlik bulunamadı.",
+  file: "Dosya bulunamadı.",
 };
 
 /** Turkish noun with the dative ("…na yorum yaptı") and locative ("…ndaki") case for titles. */
@@ -135,6 +144,7 @@ const SUBJECT_WORDS: Record<CommentSubjectType, { dative: string; locative: stri
   todo: { dative: "görevine", locative: "görevindeki" },
   document: { dative: "dokümanına", locative: "dokümanındaki" },
   event: { dative: "etkinliğine", locative: "etkinliğindeki" },
+  file: { dative: "dosyasına", locative: "dosyasındaki" },
 };
 
 /** Validate `input` and load the subject row inside ctx's workspace (NOT_FOUND otherwise). */
@@ -188,6 +198,23 @@ async function loadSubject(ctx: TenantContext, input: unknown): Promise<LoadedSu
       });
       if (row) {
         found = { ...subject, title: row.title, ownerIds: [row.createdById], isDraft: false, internal: row.internal };
+      }
+      break;
+    }
+    case "file": {
+      // Files follow their folder's internal flag; chat photos are team-only (fileClientWhere).
+      const row = await db.file.findFirst({
+        where: { ...where, ...fileClientWhere(ctx) },
+        select: { id: true, name: true, uploadedById: true, fromChat: true, folder: { select: { internal: true } } },
+      });
+      if (row) {
+        found = {
+          ...subject,
+          title: row.name,
+          ownerIds: [row.uploadedById],
+          isDraft: false,
+          internal: row.fromChat || (row.folder?.internal ?? false),
+        };
       }
       break;
     }
@@ -355,7 +382,7 @@ async function notifyNewComment(
     ]);
     const mentionedSet = new Set(mentioned);
     let followers = [...subject.ownerIds, ...earlier.map((c) => c.authorId)];
-    if (subject.type !== "document") {
+    if (subject.type !== "document" && subject.type !== "file") {
       const sub = { type: subject.type, id: subject.id };
       // Items from before subscriptions existed: seed owners + earlier commenters once.
       await ensureSubscribers(ctx, sub, followers);
@@ -445,7 +472,7 @@ export async function countComments(
   const groups = await Promise.all(
     chunks.map((chunk) =>
       db.comment.groupBy({
-        by: ["postId", "todoItemId", "documentId", "eventId"],
+        by: ["postId", "todoItemId", "documentId", "eventId", "fileId"],
         where: { workspaceId: ctx.workspaceId, ...subjectKeyIn(kind, chunk) },
         _count: { _all: true },
       }),

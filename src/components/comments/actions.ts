@@ -34,6 +34,9 @@ function revalidateSubject(slug: string, subject: CommentSubject | null) {
     case "event":
       revalidatePath(`/w/${slug}/calendar`, "layout");
       break;
+    case "file":
+      revalidatePath(`/w/${slug}/files`, "layout");
+      break;
   }
 }
 

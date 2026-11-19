@@ -17,6 +17,7 @@ import { formatDate } from "@/lib/format";
 import { canModify, isGuest } from "@/lib/roles";
 import { thumbnailEligible } from "@/lib/storage/inline";
 import type { TenantContext } from "@/lib/tenant-context";
+import { countComments } from "@/server/comments";
 import { FOLDER_ITEMS_MAX, listFolderContents, listFolderTree } from "@/server/files";
 import { listProjectOptions } from "@/server/projects";
 
@@ -94,6 +95,7 @@ export async function FolderView({ slug, ctx, folderId }: { slug: string; ctx: T
   const [{ folder, breadcrumbs, folders, files, documents, truncated }, tree] = await orNotFound(() =>
     Promise.all([listFolderContents(ctx, folderId), listFolderTree(ctx)]),
   );
+  const commentCounts = await countComments(ctx, "file", files.map((f) => f.id));
   const projects = folderId ? [] : await listProjectOptions(ctx);
 
   const rows: Row[] = [
@@ -128,7 +130,7 @@ export async function FolderView({ slug, ctx, folderId }: { slug: string; ctx: T
       ) : (
         <ItemIcon kind="file" mimeType={f.mimeType} name={f.name} />
       ),
-      meta: `${fileKind(f.mimeType, f.name).label} · ${formatBytes(f.size)}`,
+      meta: `${fileKind(f.mimeType, f.name).label} · ${formatBytes(f.size)}${commentCounts[f.id] ? ` · ${commentCounts[f.id]} yorum` : ""}`,
       person: f.uploadedBy,
       date: f.createdAt,
       ownerId: f.uploadedById,
