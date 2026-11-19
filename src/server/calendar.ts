@@ -21,6 +21,7 @@ import { notifyEventCreated, notifyEventInvited } from "@/server/notifications";
 import { remindAtField, reminderColumns } from "@/server/reminders";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
 import { autoSubscribe } from "@/server/subscriptions";
+import { deleteReactionsFor } from "@/server/reactions";
 
 const optionalText = (max: number, label: string) =>
   z
@@ -370,6 +371,7 @@ export async function deleteEvent(ctx: TenantContext, id: string): Promise<void>
   }
   await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "event", id: existing.id }], tx);
+    await deleteReactionsFor(tx, ctx.workspaceId, "event", [existing.id]);
     await tx.event.updateMany({
       where: { id: existing.id, workspaceId: ctx.workspaceId, deletedAt: null },
       data: { deletedAt: new Date(), deletedById: ctx.userId, updatedAt: existing.updatedAt },

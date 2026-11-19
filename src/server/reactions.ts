@@ -1,13 +1,22 @@
 import { z } from "zod";
 
+import type { Prisma } from "@prisma/client";
+
 import { db } from "@/lib/db";
 import type { TenantContext } from "@/lib/tenant-context";
 import { notFound, parseInput } from "@/server/errors";
-import { commentClientWhere } from "@/server/client-visibility";
+import {
+  assertNotGuest,
+  commentClientWhere,
+  documentClientWhere,
+  isGuest,
+  clientVisibleWhere,
+} from "@/server/client-visibility";
 import { visiblePostWhere } from "@/server/post-visibility";
 
 /**
- * Boosts ("Tepkiler"): short emoji reactions on posts and comments.
+ * Boosts ("Tepkiler"): short emoji reactions on posts, comments, chat
+ * messages, to-do items, documents and events.
  *
  * The subject is polymorphic (no FK), so every call first loads it scoped by
  * ctx.workspaceId (NOT_FOUND otherwise). The emoji must come from a small
@@ -15,7 +24,7 @@ import { visiblePostWhere } from "@/server/post-visibility";
  * toggling adds or removes the caller's own reaction.
  */
 
-export const REACTION_SUBJECT_TYPES = ["post", "comment"] as const;
+export const REACTION_SUBJECT_TYPES = ["post", "comment", "chatMessage", "todoItem", "document", "event"] as const;
 export type ReactionSubjectType = (typeof REACTION_SUBJECT_TYPES)[number];
 export type ReactionSubject = { type: ReactionSubjectType; id: string };
 
@@ -38,22 +47,83 @@ export type ReactionSummary = {
   mine: boolean;
 };
 
+/** A chat message is visible to team members; a DM only to its two people. */
+function chatMessageWhere(ctx: TenantContext): Prisma.ChatMessageWhereInput {
+  return {
+    workspaceId: ctx.workspaceId,
+    OR: [{ recipientId: null }, { recipientId: ctx.userId }, { authorId: ctx.userId }],
+  };
+}
+
+/** The ids (of `ids`) of this type that exist in the workspace and are visible to the caller. */
+async function visibleSubjectIds(ctx: TenantContext, type: ReactionSubjectType, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const w = ctx.workspaceId;
+  const pick = (rows: { id: string }[]) => rows.map((r) => r.id);
+  const select = { id: true } as const;
+  switch (type) {
+    case "post":
+      return pick(
+        await db.post.findMany({
+          where: { id: { in: ids }, workspaceId: w, deletedAt: null, ...visiblePostWhere(ctx) },
+          select,
+        }),
+      );
+    case "comment":
+      return pick(await db.comment.findMany({ where: { id: { in: ids }, workspaceId: w, ...commentClientWhere(ctx) }, select }));
+    case "chatMessage":
+      // The chat is team-only: guests see nothing.
+      if (isGuest(ctx.role)) return [];
+      return pick(await db.chatMessage.findMany({ where: { id: { in: ids }, ...chatMessageWhere(ctx) }, select }));
+    case "todoItem":
+      return pick(
+        await db.todoItem.findMany({
+          where: {
+            id: { in: ids },
+            workspaceId: w,
+            deletedAt: null,
+            list: { deletedAt: null, ...clientVisibleWhere(ctx) },
+          },
+          select,
+        }),
+      );
+    case "document":
+      return pick(
+        await db.document.findMany({
+          where: { id: { in: ids }, workspaceId: w, deletedAt: null, ...documentClientWhere(ctx) },
+          select,
+        }),
+      );
+    case "event":
+      return pick(
+        await db.event.findMany({
+          where: { id: { in: ids }, workspaceId: w, deletedAt: null, ...clientVisibleWhere(ctx) },
+          select,
+        }),
+      );
+  }
+}
+
 async function requireSubject(ctx: TenantContext, input: unknown): Promise<ReactionSubject> {
   const s = parseInput(subjectSchema, input);
-  let found: { id: string } | null = null;
-  if (s.type === "post") {
-    found = await db.post.findFirst({
-      where: { id: s.id, workspaceId: ctx.workspaceId, deletedAt: null, ...visiblePostWhere(ctx) },
-      select: { id: true },
-    });
-  } else {
-    found = await db.comment.findFirst({
-      where: { id: s.id, workspaceId: ctx.workspaceId, ...commentClientWhere(ctx) },
-      select: { id: true },
-    });
-  }
-  if (!found) throw notFound("Kayıt bulunamadı.");
+  if (s.type === "chatMessage") assertNotGuest(ctx, "Sohbet yalnızca ekibe açıktır.");
+  const visible = await visibleSubjectIds(ctx, s.type, [s.id]);
+  if (visible.length === 0) throw notFound("Kayıt bulunamadı.");
   return s;
+}
+
+/**
+ * Removes every reaction on the given subjects. Call it inside the same
+ * transaction that deletes them.
+ */
+export async function deleteReactionsFor(
+  client: Pick<typeof db, "reaction">,
+  workspaceId: string,
+  type: ReactionSubjectType,
+  ids: string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  await client.reaction.deleteMany({ where: { workspaceId, subjectType: type, subjectId: { in: ids } } });
 }
 
 /**
@@ -96,11 +166,13 @@ export async function listReactions(
   );
   const result: Record<string, ReactionSummary[]> = {};
   if (wanted.length === 0) return result;
+  const visible = await visibleSubjectIds(ctx, type, wanted);
+  if (visible.length === 0) return result;
   const rows = await db.reaction.findMany({
     where: {
       workspaceId: ctx.workspaceId,
       subjectType: type,
-      subjectId: { in: wanted },
+      subjectId: { in: visible },
       user: { memberships: { some: { workspaceId: ctx.workspaceId } } },
     },
     select: { subjectId: true, userId: true, emoji: true },

@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { getPeer, listConversations, listMessages } from "@/server/chat";
 import { isServiceError } from "@/server/errors";
 import { markDmRead } from "@/server/notifications";
+import { listReactions, REACTION_EMOJIS } from "@/server/reactions";
 
 export const metadata: Metadata = { title: "Sohbet" };
 export const dynamic = "force-dynamic";
@@ -46,6 +47,11 @@ export default async function ChatPage({
     getRealtimeConfig(),
     listConversations(ctx),
   ]);
+  const reactions = await listReactions(
+    ctx,
+    "chatMessage",
+    messages.map((m) => m.id),
+  );
   const base = `/w/${workspace.slug}/chat`;
   const tab = "flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm min-h-10";
 
@@ -95,6 +101,8 @@ export default async function ChatPage({
         initialMessages={messages}
         initialHasMore={hasMore}
         realtime={realtime}
+        reactions={reactions}
+        allowedReactions={REACTION_EMOJIS}
       />
     </div>
   );

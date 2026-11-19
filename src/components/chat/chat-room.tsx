@@ -7,6 +7,7 @@ import { groupFeed, type FeedItem } from "@/components/chat/chat-utils";
 import { ChatComposer } from "@/components/chat/composer";
 import { DeleteMessageDialog } from "@/components/chat/delete-message-dialog";
 import { MessageFeed } from "@/components/chat/message-feed";
+import type { ReactionView } from "@/components/reactions/reaction-bar";
 import { useChatFeed } from "@/components/chat/use-chat-feed";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,8 @@ export function ChatRoom({
   initialMessages,
   initialHasMore,
   realtime,
+  reactions = {},
+  allowedReactions = [],
 }: {
   slug: string;
   workspaceId: string;
@@ -47,6 +50,8 @@ export function ChatRoom({
   initialMessages: ChatMessageDTO[];
   initialHasMore: boolean;
   realtime: PublicRealtimeConfig | null;
+  reactions?: Record<string, ReactionView[]>;
+  allowedReactions?: readonly string[];
 }) {
   const feed = useChatFeed({ slug, workspaceId, peerId, initialMessages, initialHasMore, realtime });
   const isClient = useIsClient();
@@ -238,6 +243,9 @@ export function ChatRoom({
               onDelete={setDeleteTarget}
               onRetry={feed.retry}
               onDiscard={feed.discard}
+              slug={slug}
+              reactions={reactions}
+              allowedReactions={allowedReactions}
             />
           </>
         )}

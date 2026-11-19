@@ -7,7 +7,7 @@ import { requireWorkspace } from "@/lib/tenant";
 import { toggleReaction } from "@/server/reactions";
 
 /**
- * Toggle the caller's emoji reaction on a post or comment. The subject sent
+ * Toggle the caller's emoji reaction on a post, comment, chat message, to-do, document or event. The subject sent
  * by the client is only a hint: the service validates it inside the caller's
  * workspace.
  */

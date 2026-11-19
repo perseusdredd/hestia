@@ -46,6 +46,7 @@ import {
 } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
+import { deleteReactionsFor } from "@/server/reactions";
 
 /*
  * Client / guest visibility ("Yalnızca ekip"): folders and documents carry an
@@ -1440,6 +1441,7 @@ export async function deleteDocument(ctx: TenantContext, documentId: string) {
   if (!canModify(ctx, doc.authorId)) throw forbidden();
   await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "document", id: doc.id }], tx);
+    await deleteReactionsFor(tx, ctx.workspaceId, "document", [doc.id]);
     const { count } = await tx.document.updateMany({
       where: { id: doc.id, workspaceId: ctx.workspaceId, deletedAt: null },
       data: { deletedAt: new Date(), deletedById: ctx.userId, updatedAt: doc.updatedAt },

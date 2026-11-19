@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { toggleReactionAction } from "@/components/reactions/actions";
 import type { ActionState } from "@/lib/action-state";
 import { cn } from "@/lib/utils";
+import type { ReactionSubjectType } from "@/server/reactions";
 
 export type ReactionView = { emoji: string; count: number; mine: boolean };
 
@@ -22,7 +23,7 @@ export function ReactionBar({
   allowed,
 }: {
   slug: string;
-  subject: { type: "post" | "comment"; id: string };
+  subject: { type: ReactionSubjectType; id: string };
   reactions: ReactionView[];
   allowed: readonly string[];
 }) {

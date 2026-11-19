@@ -17,6 +17,7 @@ import { deleteObjects, restoreFolderTree } from "@/server/files";
 import { assertNotGuest } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { visiblePostWhere } from "@/server/post-visibility";
+import { deleteReactionsFor } from "@/server/reactions";
 
 /*
  * Trash (soft delete). Posts, to-dos, to-do lists, events, files, documents and
@@ -324,6 +325,25 @@ async function purgeFiles(
   return res.count;
 }
 
+type ReactionPurge = {
+  todoItem?: { where: Prisma.TodoItemWhereInput };
+  event?: { where: Prisma.EventWhereInput };
+  document?: { where: Prisma.DocumentWhereInput };
+};
+
+/** Removes the reactions of the rows a purge is about to delete (the subject has no FK). */
+async function purgeReactionsOf(workspaceId: string | null, q: ReactionPurge): Promise<void> {
+  const sets: [Parameters<typeof deleteReactionsFor>[2], { id: string; workspaceId: string }[]][] = [];
+  if (q.todoItem) sets.push(["todoItem", await db.todoItem.findMany({ where: q.todoItem.where, select: { id: true, workspaceId: true } })]);
+  if (q.event) sets.push(["event", await db.event.findMany({ where: q.event.where, select: { id: true, workspaceId: true } })]);
+  if (q.document) sets.push(["document", await db.document.findMany({ where: q.document.where, select: { id: true, workspaceId: true } })]);
+  for (const [type, rows] of sets) {
+    const byWorkspace = new Map<string, string[]>();
+    for (const r of rows) byWorkspace.set(r.workspaceId, [...(byWorkspace.get(r.workspaceId) ?? []), r.id]);
+    for (const [ws, ids] of byWorkspace) await deleteReactionsFor(db, workspaceId ?? ws, type, ids);
+  }
+}
+
 /** Deletes one trashed item (and what went with it) for good. Same permission as restoring. */
 export async function purgeTrashItem(
   ctx: TenantContext,
@@ -335,6 +355,7 @@ export async function purgeTrashItem(
   const found = await findTrashed(ctx, kind, id);
   if (!canModify(ctx, found.ownerId)) throw forbidden("Bu öğeyi kalıcı olarak silme yetkiniz yok.");
   const scope = { id, workspaceId: ctx.workspaceId, deletedAt: trashed };
+  const dropReactions = (q: ReactionPurge) => purgeReactionsOf(ctx.workspaceId, q);
   const together = { workspaceId: ctx.workspaceId, deletedAt: found.deletedAt };
 
   switch (kind) {
@@ -342,15 +363,19 @@ export async function purgeTrashItem(
       await db.post.deleteMany({ where: scope }); // comments cascade
       break;
     case "todoItem":
+      await dropReactions({ todoItem: { where: scope } });
       await db.todoItem.deleteMany({ where: scope });
       break;
     case "todoList":
+      await dropReactions({ todoItem: { where: { workspaceId: ctx.workspaceId, listId: id } } });
       await db.todoList.deleteMany({ where: scope }); // items cascade
       break;
     case "event":
+      await dropReactions({ event: { where: scope } });
       await db.event.deleteMany({ where: scope });
       break;
     case "document":
+      await dropReactions({ document: { where: scope } });
       await db.document.deleteMany({ where: scope });
       break;
     case "file":
@@ -359,6 +384,7 @@ export async function purgeTrashItem(
     case "folder":
       // Everything that was trashed with it, files first (their folder link is SetNull).
       await purgeFiles(together, storage);
+      await dropReactions({ document: { where: { ...together, deletedAt: found.deletedAt } } });
       await db.document.deleteMany({ where: { ...together, deletedAt: found.deletedAt } });
       await db.folder.deleteMany({ where: scope }); // subfolders cascade
       break;
@@ -388,6 +414,11 @@ export async function purgeExpiredTrash(
 ): Promise<TrashPurgeResult> {
   const expired = { lt: new Date(now.getTime() - TRASH_RETENTION_DAYS * DAY_MS) };
   const where = { deletedAt: expired };
+  await purgeReactionsOf(null, {
+    todoItem: { where: { OR: [{ deletedAt: expired }, { list: { deletedAt: expired } }] } },
+    event: { where },
+    document: { where },
+  });
   const posts = await db.post.deleteMany({ where });
   const todoItems = await db.todoItem.deleteMany({ where });
   const todoLists = await db.todoList.deleteMany({ where });

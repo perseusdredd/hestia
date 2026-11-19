@@ -20,6 +20,8 @@ import { getTodoItemDetail } from "@/server/todos";
 import { isBookmarked } from "@/server/bookmarks";
 import { isSubscribed, countSubscribers } from "@/server/subscriptions";
 import { isServiceError } from "@/server/errors";
+import { ReactionBar } from "@/components/reactions/reaction-bar";
+import { listReactions, REACTION_EMOJIS } from "@/server/reactions";
 
 type Params = Promise<{ slug: string; itemId: string }>;
 
@@ -44,10 +46,11 @@ export default async function TodoItemPage({ params }: { params: Params }) {
   const { slug, itemId } = await params;
   const { ctx, item } = await load(slug, itemId);
   const subject = { type: "todo" as const, id: item.id };
-  const [subscribed, subscribers, bookmarked] = await Promise.all([
+  const [subscribed, subscribers, bookmarked, reactions] = await Promise.all([
     isSubscribed(ctx, subject),
     countSubscribers(ctx, subject),
     isBookmarked(ctx, subject),
+    listReactions(ctx, "todoItem", [item.id]),
   ]);
   const overdue = !item.done && item.dueDate !== null && item.dueDate < todayDateOnly();
 
@@ -179,6 +182,13 @@ export default async function TodoItemPage({ params }: { params: Params }) {
             </p>
           </CardContent>
         </Card>
+
+        <ReactionBar
+          slug={slug}
+          subject={{ type: "todoItem", id: item.id }}
+          reactions={reactions[item.id] ?? []}
+          allowed={REACTION_EMOJIS}
+        />
 
         <div className="flex flex-wrap items-center gap-3">
           <BookmarkToggle slug={slug} subject={subject} bookmarked={bookmarked} />

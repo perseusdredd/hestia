@@ -5,6 +5,7 @@ import { memo } from "react";
 
 import { timeLabel, type FeedItem, type FeedRow } from "@/components/chat/chat-utils";
 import { LinkifiedText } from "@/components/linkified-text";
+import { ReactionBar, type ReactionView } from "@/components/reactions/reaction-bar";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
@@ -16,6 +17,10 @@ type Handlers = {
   onDelete: (item: FeedItem) => void;
   onRetry: (clientId: string) => void;
   onDiscard: (clientId: string) => void;
+  slug: string;
+  /** Boosts per message id; messages that just arrived live have none until the page refreshes. */
+  reactions: Record<string, ReactionView[]>;
+  allowedReactions: readonly string[];
 };
 
 export function MessageFeed({ rows, ...handlers }: { rows: FeedRow[] } & Handlers) {
@@ -79,11 +84,24 @@ function sameLine(a: LineProps, b: LineProps): boolean {
     a.canDelete === b.canDelete &&
     a.onDelete === b.onDelete &&
     a.onRetry === b.onRetry &&
-    a.onDiscard === b.onDiscard
+    a.onDiscard === b.onDiscard &&
+    a.slug === b.slug &&
+    a.allowedReactions === b.allowedReactions &&
+    (x.id ? a.reactions[x.id] : undefined) === (y.id ? b.reactions[y.id] : undefined)
   );
 }
 
-const MessageLine = memo(function MessageLine({ item, canDelete, onImageLoad, onDelete, onRetry, onDiscard }: LineProps) {
+const MessageLine = memo(function MessageLine({
+  item,
+  canDelete,
+  onImageLoad,
+  onDelete,
+  onRetry,
+  onDiscard,
+  slug,
+  reactions,
+  allowedReactions,
+}: LineProps) {
   const deletable = item.status === "sent" && canDelete(item);
   return (
     <div
@@ -121,6 +139,17 @@ const MessageLine = memo(function MessageLine({ item, canDelete, onImageLoad, on
             className="max-h-72 w-auto max-w-full rounded-lg border bg-muted object-contain sm:max-w-sm"
           />
         </a>
+      ) : null}
+
+      {item.status === "sent" && item.id ? (
+        <div className="mt-1">
+          <ReactionBar
+            slug={slug}
+            subject={{ type: "chatMessage", id: item.id }}
+            reactions={reactions[item.id] ?? []}
+            allowed={allowedReactions}
+          />
+        </div>
       ) : null}
 
       {item.status === "sending" ? (

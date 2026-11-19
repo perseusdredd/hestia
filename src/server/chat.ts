@@ -17,6 +17,7 @@ import { assertNotGuest } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import type { StorageDriver } from "@/lib/storage";
 import { hardDeleteFile } from "@/server/files";
+import { deleteReactionsFor } from "@/server/reactions";
 
 /**
  * Workspace chat ("Sohbet"): one room per workspace.
@@ -463,7 +464,11 @@ export async function deleteMessage(
     throw forbidden("Yalnızca kendi mesajlarınızı silebilirsiniz.");
   }
   // Scoped again by workspaceId so the write can never touch another tenant.
-  const res = await db.chatMessage.deleteMany({ where: { id: msg.id, workspaceId: ctx.workspaceId } });
+  const res = await db.$transaction(async (tx) => {
+    const r = await tx.chatMessage.deleteMany({ where: { id: msg.id, workspaceId: ctx.workspaceId } });
+    if (r.count > 0) await deleteReactionsFor(tx, ctx.workspaceId, "chatMessage", [msg.id]);
+    return r;
+  });
   if (res.count === 0) throw notFound("Mesaj bulunamadı.");
   // The photo goes with its message (row + stored bytes). Never fails the delete.
   if (msg.fileId) {

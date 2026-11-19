@@ -18,6 +18,8 @@ import { canModify } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
 import { isBookmarked } from "@/server/bookmarks";
 import { getDocument } from "@/server/files";
+import { ReactionBar } from "@/components/reactions/reaction-bar";
+import { listReactions, REACTION_EMOJIS } from "@/server/reactions";
 
 import { deleteDocumentAction } from "../../actions";
 import { orNotFound } from "../../load";
@@ -37,6 +39,7 @@ export default async function DocumentPage({ params }: { params: Params }) {
   const { ctx } = await requireWorkspace(slug);
   const { document, breadcrumbs } = await orNotFound(() => getDocument(ctx, docId));
   const bookmarked = await isBookmarked(ctx, { type: "document", id: document.id });
+  const reactions = await listReactions(ctx, "document", [document.id]);
   const editable = canModify(ctx, document.authorId);
   const edited = document.updatedAt.getTime() - document.createdAt.getTime() > 1000;
 
@@ -110,6 +113,12 @@ export default async function DocumentPage({ params }: { params: Params }) {
           description={editable ? "Düzenle düğmesiyle içerik ekleyebilirsiniz." : undefined}
         />
       )}
+      <ReactionBar
+        slug={slug}
+        subject={{ type: "document", id: document.id }}
+        reactions={reactions[document.id] ?? []}
+        allowed={REACTION_EMOJIS}
+      />
       <BookmarkToggle slug={slug} subject={{ type: "document", id: document.id }} bookmarked={bookmarked} />
       <CommentThread slug={slug} ctx={ctx} subject={{ type: "document", id: document.id }} />
     </div>

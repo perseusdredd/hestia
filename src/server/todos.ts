@@ -14,6 +14,7 @@ import { reminderColumns, remindAtField } from "@/server/reminders";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
 import { autoSubscribe } from "@/server/subscriptions";
 import { isWorkspaceMember } from "@/server/workspaces";
+import { deleteReactionsFor } from "@/server/reactions";
 
 /**
  * To-do lists and items. Every function is scoped by ctx.workspaceId.
@@ -651,6 +652,7 @@ export async function deleteTodoItem(ctx: TenantContext, id: string) {
   if (!canModify(ctx, item.createdById)) throw forbidden();
   await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "todoItem", id: item.id }], tx);
+    await deleteReactionsFor(tx, ctx.workspaceId, "todoItem", [item.id]);
     await tx.todoItem.updateMany({
       where: { id: item.id, workspaceId: ctx.workspaceId, deletedAt: null },
       data: { deletedAt: new Date(), deletedById: ctx.userId, updatedAt: item.updatedAt },

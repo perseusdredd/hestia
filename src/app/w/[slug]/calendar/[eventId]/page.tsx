@@ -20,6 +20,8 @@ import { requireWorkspace } from "@/lib/tenant";
 import { RECURRENCE_LABELS, isRecurrence } from "@/lib/recurrence";
 import { getEvent, listEventInviteeIds } from "@/server/calendar";
 import { isServiceError } from "@/server/errors";
+import { ReactionBar } from "@/components/reactions/reaction-bar";
+import { listReactions, REACTION_EMOJIS } from "@/server/reactions";
 import { isBookmarked } from "@/server/bookmarks";
 import { isSubscribed, countSubscribers } from "@/server/subscriptions";
 import { listMemberUsers } from "@/server/workspaces";
@@ -48,12 +50,13 @@ export default async function EventPage({ params }: { params: Params }) {
   const { slug, eventId } = await params;
   const { ctx, event } = await load(slug, eventId);
   const subject = { type: "event" as const, id: event.id };
-  const [members, subscribed, subscribers, bookmarked, inviteeIds] = await Promise.all([
+  const [members, subscribed, subscribers, bookmarked, inviteeIds, reactions] = await Promise.all([
     listMemberUsers(ctx),
     isSubscribed(ctx, subject),
     countSubscribers(ctx, subject),
     isBookmarked(ctx, subject),
     listEventInviteeIds(ctx, event.id),
+    listReactions(ctx, "event", [event.id]),
   ]);
   const invitees = inviteeIds.flatMap((id) => members.find((m) => m.id === id) ?? []);
   const creator = members.find((m) => m.id === event.createdById) ?? null;
@@ -144,6 +147,13 @@ export default async function EventPage({ params }: { params: Params }) {
             </p>
           </CardContent>
         </Card>
+
+        <ReactionBar
+          slug={slug}
+          subject={{ type: "event", id: event.id }}
+          reactions={reactions[event.id] ?? []}
+          allowed={REACTION_EMOJIS}
+        />
 
         <div className="flex flex-wrap items-center gap-3">
           <BookmarkToggle slug={slug} subject={subject} bookmarked={bookmarked} />
