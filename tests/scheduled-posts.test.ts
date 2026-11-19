@@ -12,6 +12,7 @@ import {
   listPosts,
   publishPost,
   schedulePost,
+  unscheduleDraft,
   updatePost,
 } from "@/server/messages";
 import { publishDueScheduled } from "@/server/scheduled-posts";
@@ -210,5 +211,18 @@ describe("scheduled messages", () => {
     const d = await createPost(author, { title: "Düz taslak", body: "x", draft: true });
     await publishDueScheduled(new Date(Date.now() + 100 * HOUR));
     expect((await db.post.findUniqueOrThrow({ where: { id: d.id } })).publishedAt).toBeNull();
+  });
+
+  it("saving a scheduled post as a plain draft clears the schedule so it never auto-publishes", async () => {
+    const p = await schedule({ title: "Taslağa dönecek" }, 3 * HOUR);
+    expect((await db.post.findUniqueOrThrow({ where: { id: p.id } })).scheduledFor).not.toBeNull();
+
+    await unscheduleDraft(author, p.id); // what "Taslağı kaydet" does
+    const after = await db.post.findUniqueOrThrow({ where: { id: p.id } });
+    expect(after.scheduledFor).toBeNull();
+    expect(after.publishedAt).toBeNull(); // still an author-only draft
+
+    await publishDueScheduled(new Date(Date.now() + 10 * HOUR)); // well past its old time
+    expect((await db.post.findUniqueOrThrow({ where: { id: p.id } })).publishedAt).toBeNull();
   });
 });

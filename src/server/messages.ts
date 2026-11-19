@@ -293,6 +293,18 @@ export async function schedulePost(ctx: TenantContext, postId: string, scheduled
 }
 
 /** Cancels a schedule: the post goes back to a plain draft. */
+/**
+ * Clear a pending schedule when a post is saved explicitly as a draft, so it no
+ * longer auto-publishes. Scoped to unpublished posts, so editing an already
+ * published post is a harmless no-op (never throws).
+ */
+export async function unscheduleDraft(ctx: TenantContext, postId: string): Promise<void> {
+  await db.post.updateMany({
+    where: { id: postId, workspaceId: ctx.workspaceId, deletedAt: null, publishedAt: null },
+    data: { scheduledFor: null },
+  });
+}
+
 export async function cancelSchedule(ctx: TenantContext, postId: string) {
   const post = await findPostInWorkspace(ctx, postId);
   if (post.authorId !== ctx.userId) throw forbidden("Zamanlamayı yalnızca yazarı iptal edebilir.");

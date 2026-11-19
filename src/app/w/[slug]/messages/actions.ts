@@ -7,6 +7,7 @@ import { formFlag, formString, toActionState, type ActionState } from "@/lib/act
 import { requireWorkspace } from "@/lib/tenant";
 import {
   cancelSchedule,
+  unscheduleDraft,
   createPost,
   deletePost,
   listPosts,
@@ -86,6 +87,8 @@ export async function updatePostAction(
       revalidate(slug);
       return { ok: true, message: "Gönderi yayınlandı.", values };
     }
+    // A plain draft save ("Taslağı kaydet") must not leave the post scheduled.
+    await unscheduleDraft(ctx, id);
     revalidate(slug);
     return { ok: true, message: "Gönderi güncellendi.", values };
   } catch (e) {
