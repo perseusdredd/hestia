@@ -65,6 +65,7 @@ export default async function CalendarPage({
     recurrence: e.recurrence,
     recurrenceUntil: e.recurrenceUntil ? istanbulDayKey(e.recurrenceUntil) : "",
     inviteeIds: inviteeIds[e.id] ?? [],
+    remindAt: e.remindAt ? toIstanbulInputValue(e.remindAt, true) : "",
     startTime: e.allDay ? null : istanbulTime(startsAt),
     endTime: e.allDay ? null : istanbulTime(endsAt),
     startKey: istanbulDayKey(startsAt),

@@ -12,4 +12,5 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   CHAT_DM: "Doğrudan mesaj geldiğinde",
   CHECKIN: "Otomatik kontrol sorusu sorulduğunda",
   EVENT_INVITE: "Bir etkinliğe davet edildiğimde",
+  REMINDER: "Bir görev veya etkinlik hatırlatması geldiğinde",
 };

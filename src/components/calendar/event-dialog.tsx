@@ -278,6 +278,19 @@ function EventForm({
       </div>
 
       <div className="grid gap-1.5">
+        <Label htmlFor="ev-remind">Hatırlatma (isteğe bağlı)</Label>
+        <Input
+          id="ev-remind"
+          name="remindAt"
+          type="datetime-local"
+          disabled={readOnly}
+          defaultValue={v?.remindAt ?? event?.remindAt ?? ""}
+          aria-invalid={Boolean(fe?.remindAt)}
+        />
+        <FieldError errors={fe?.remindAt} />
+      </div>
+
+      <div className="grid gap-1.5">
         <Label htmlFor="ev-location">Konum</Label>
         <div className="relative">
           <MapPin

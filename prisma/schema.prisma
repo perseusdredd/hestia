@@ -334,6 +334,9 @@ model TodoItem {
   // Soft delete: set while the row is in the trash (purged after 30 days by the cleanup cron).
   deletedAt   DateTime?
   deletedById String?
+  // Reminder ("Hatırlatma"): null remindAt = none. reminderSentAt is stamped by the reminders cron.
+  remindAt       DateTime?
+  reminderSentAt DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   section   TodoSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
@@ -348,6 +351,7 @@ model TodoItem {
   @@index([assigneeId])
   @@index([workspaceId, deletedAt])
   @@index([sectionId])
+  @@index([remindAt, reminderSentAt])
 }
 
 /// Optional named header inside a to-do list. Items with sectionId null render ungrouped.
@@ -488,6 +492,9 @@ model Event {
   projectId   String?
   // Team-only: hidden from GUEST members. false = visible to everyone (the default for all existing rows).
   internal    Boolean  @default(false)
+  // Reminder ("Hatırlatma"): null remindAt = none. reminderSentAt is stamped by the reminders cron.
+  remindAt       DateTime?
+  reminderSentAt DateTime?
 
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -498,6 +505,7 @@ model Event {
   @@index([workspaceId, startsAt])
   @@index([workspaceId, deletedAt])
   @@index([workspaceId, projectId])
+  @@index([remindAt, reminderSentAt])
 }
 
 model EventInvitee {

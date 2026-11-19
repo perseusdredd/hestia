@@ -18,6 +18,7 @@ import { eventActivityPath, forgetActivity, recordActivity, syncActivityInternal
 import { resolveInternal, resolveInternalUpdate } from "@/server/client-visibility";
 import { forbidden, notFound, parseInput, ServiceError } from "@/server/errors";
 import { notifyEventCreated, notifyEventInvited } from "@/server/notifications";
+import { remindAtField, reminderColumns } from "@/server/reminders";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
 import { autoSubscribe } from "@/server/subscriptions";
 
@@ -51,6 +52,8 @@ const eventInputSchema = z.object({
   projectId: projectIdField,
   /** "Yalnızca ekip": hidden from guests (ignored when a guest writes). Omitted = unchanged on update. */
   internal: z.boolean().optional(),
+  /** Reminder: Istanbul "YYYY-MM-DDTHH:mm"; empty clears it, omitted = unchanged on update. */
+  remindAt: remindAtField,
 });
 
 export type EventInput = z.input<typeof eventInputSchema>;
@@ -112,16 +115,17 @@ export function normalizeEventInput(input: unknown) {
     inviteeIds: v.inviteeIds,
     projectId: v.projectId,
     internal: v.internal,
+    remindAt: v.remindAt,
   };
 }
 
 /** The columns persisted on Event (normalizeEventInput minus the invitee list). */
 function eventColumns(data: ReturnType<typeof normalizeEventInput>) {
-  const { inviteeIds: _inviteeIds, projectId: _projectId, internal: _internal, ...columns } = data;
+  const { inviteeIds: _inviteeIds, projectId: _projectId, internal: _internal, remindAt, ...columns } = data;
   void _inviteeIds;
   void _projectId;
   void _internal;
-  return columns;
+  return { ...columns, ...(remindAt !== undefined ? { remindAt } : {}) };
 }
 
 /** One calendar occurrence of an event (a non-recurring event has exactly one, index 0). */
@@ -337,7 +341,7 @@ export async function updateEvent(ctx: TenantContext, id: string, input: unknown
   const internal = resolveInternalUpdate(ctx, parsed.internal);
   const res = await db.event.updateMany({
     where: { id, workspaceId: ctx.workspaceId, deletedAt: null },
-    data: { ...data, ...(internal !== undefined ? { internal } : {}) },
+    data: { ...data, ...reminderColumns(parsed.remindAt, existing.remindAt), ...(internal !== undefined ? { internal } : {}) },
   });
   if (res.count === 0) throw notFound("Etkinlik bulunamadı.");
   if (internal !== undefined && internal !== existing.internal) await syncActivityInternal(ctx, { type: "event", id });

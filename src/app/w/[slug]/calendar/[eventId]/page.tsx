@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarClock, Repeat, Users } from "lucide-react";
+import { ArrowLeft, BellRing, CalendarClock, Repeat, Users } from "lucide-react";
 import { MapPin } from "lucide-react";
 
 import { CommentThread } from "@/components/comments/comment-thread";
@@ -15,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { eventWhen } from "@/lib/event-labels";
 import { formatDateTime } from "@/lib/format";
-import { istanbulDayKey } from "@/lib/istanbul-time";
+import { istanbulDayKey, toIstanbulInputValue } from "@/lib/istanbul-time";
 import { requireWorkspace } from "@/lib/tenant";
 import { RECURRENCE_LABELS, isRecurrence } from "@/lib/recurrence";
 import { getEvent, listEventInviteeIds } from "@/server/calendar";
@@ -100,6 +100,12 @@ export default async function EventPage({ params }: { params: Params }) {
               <p className="flex items-start gap-1.5 text-sm">
                 <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 break-words">{event.location}</span>
+              </p>
+            ) : null}
+            {event.remindAt ? (
+              <p className="flex items-start gap-1.5 text-sm">
+                <BellRing className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span>Hatırlatma: {toIstanbulInputValue(event.remindAt, true).replace("T", " ")}</span>
               </p>
             ) : null}
             {invitees.length > 0 ? (

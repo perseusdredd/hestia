@@ -15,6 +15,8 @@ export type CalEvent = {
   recurrence: string;
   recurrenceUntil: string;
   inviteeIds: string[];
+  /** Reminder as Istanbul "YYYY-MM-DDTHH:mm" ("" = none). */
+  remindAt: string;
   /** Occurrence times for display: "HH:mm" for timed events, null for all-day. */
   startTime: string | null;
   endTime: string | null;

@@ -3,12 +3,14 @@ import { z } from "zod";
 
 import { dateOnlyToDb, dbToDateOnly, isDateOnly } from "@/lib/date-only";
 import { db } from "@/lib/db";
+import { toIstanbulInputValue } from "@/lib/istanbul-time";
 import { canModify, clientVisibleWhere, isGuest } from "@/lib/roles";
 import type { TenantContext } from "@/lib/tenant-context";
 import { forgetActivity, recordActivity, recordTodoToggled, syncActivityInternal } from "@/server/activity";
 import { assertNotGuest, resolveInternal, resolveInternalUpdate, todoItemClientWhere } from "@/server/client-visibility";
 import { conflict, forbidden, notFound, ServiceError, parseInput } from "@/server/errors";
 import { notifyTodoAssigned } from "@/server/notifications";
+import { reminderColumns, remindAtField } from "@/server/reminders";
 import { assertAssignableProject, projectIdField } from "@/server/projects";
 import { autoSubscribe } from "@/server/subscriptions";
 import { isWorkspaceMember } from "@/server/workspaces";
@@ -85,6 +87,7 @@ const createItemSchema = z
     startOn: startDateSchema.optional(),
     sectionId: sectionIdSchema.optional(),
     extraAssigneeIds: extraAssigneesSchema.optional(),
+    remindAt: remindAtField,
   })
   .refine(startNotAfterDue, startNotAfterDueError);
 const updateItemSchema = z
@@ -96,6 +99,7 @@ const updateItemSchema = z
     startOn: startDateSchema.optional(),
     sectionId: sectionIdSchema.optional(),
     extraAssigneeIds: extraAssigneesSchema.optional(),
+    remindAt: remindAtField,
   })
   .refine(startNotAfterDue, startNotAfterDueError);
 
@@ -114,6 +118,8 @@ export type TodoItemDTO = {
   /** Additional assignees besides the primary one. */
   extraAssignees: TodoUser[];
   startOn: string | null; // yyyy-MM-dd, no timezone
+  /** Reminder as Istanbul wall time "YYYY-MM-DDTHH:mm" ("" = none). */
+  remindAt: string;
   sectionId: string | null;
   canEdit: boolean;
 };
@@ -151,6 +157,7 @@ type ItemRow = {
   createdById: string;
   assignee: TodoUser | null;
   startOn?: Date | null;
+  remindAt?: Date | null;
   sectionId?: string | null;
   extraAssignees?: { user: TodoUser }[];
 };
@@ -168,6 +175,7 @@ function toItemDTO(ctx: TenantContext, i: ItemRow): TodoItemDTO {
     assignee: i.assignee,
     extraAssignees: (i.extraAssignees ?? []).map((e) => e.user),
     startOn: i.startOn ? dbToDateOnly(i.startOn) : null,
+    remindAt: i.remindAt ? toIstanbulInputValue(i.remindAt, true) : "",
     sectionId: i.sectionId ?? null,
     canEdit: canModify(ctx, i.createdById),
   };
@@ -464,6 +472,7 @@ export async function createTodoItem(ctx: TenantContext, listId: string, input: 
         dueDate: data.dueDate ? dateOnlyToDb(data.dueDate) : null,
         startOn: data.startOn ? dateOnlyToDb(data.startOn) : null,
         sectionId: data.sectionId ?? null,
+        remindAt: data.remindAt ?? null,
         position: (max._max.position ?? -1) + 1,
         ...(extras.length
           ? { extraAssignees: { create: extras.map((userId) => ({ workspaceId: ctx.workspaceId, userId })) } }
@@ -522,6 +531,7 @@ export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
       status: true,
       dueDate: true,
       startOn: true,
+      remindAt: true,
       sectionId: true,
       section: { select: { name: true } },
       completedAt: true,
@@ -539,6 +549,7 @@ export async function getTodoItemDetail(ctx: TenantContext, itemId: string) {
     done: item.status === "DONE",
     dueDate: item.dueDate ? dbToDateOnly(item.dueDate) : null,
     startOn: item.startOn ? dbToDateOnly(item.startOn) : null,
+    remindAt: item.remindAt ? item.remindAt.toISOString() : null,
     sectionName: item.section?.name ?? null,
     extraAssignees: item.extraAssignees.map((e) => e.user),
     canEdit: canModify(ctx, item.createdById),
@@ -569,6 +580,7 @@ export async function updateTodoItem(ctx: TenantContext, id: string, input: unkn
       )
     : [];
   const fields = {
+      ...reminderColumns(data.remindAt, item.remindAt),
       ...(data.startOn !== undefined ? { startOn: data.startOn ? dateOnlyToDb(data.startOn) : null } : {}),
       ...(data.sectionId !== undefined ? { sectionId: data.sectionId } : {}),
       ...(data.title !== undefined ? { title: data.title } : {}),

@@ -110,6 +110,7 @@ export async function updateItemAction(
     assigneeId: formString(formData, "assigneeId"),
     dueDate: formString(formData, "dueDate"),
     startOn: formString(formData, "startOn"),
+    remindAt: formString(formData, "remindAt"),
   };
   try {
     const { ctx } = await requireWorkspace(slug);

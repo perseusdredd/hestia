@@ -441,6 +441,17 @@ function EditItemForm({
             />
             <FieldError errors={state.fieldErrors?.startOn} />
           </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor={`t-remind-${item.id}`}>Hatırlatma</Label>
+            <Input
+              id={`t-remind-${item.id}`}
+              name="remindAt"
+              type="datetime-local"
+              defaultValue={v?.remindAt ?? item.remindAt ?? ""}
+              aria-invalid={Boolean(state.fieldErrors?.remindAt) || undefined}
+            />
+            <FieldError errors={state.fieldErrors?.remindAt} />
+          </div>
           {members.length > 1 ? (
             <fieldset className="grid gap-1.5">
               <legend className="text-sm font-medium">Ek atananlar</legend>

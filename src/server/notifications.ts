@@ -40,6 +40,8 @@ export const NOTIFICATION_TYPES = [
   "CHECKIN",
   /** You were invited to a calendar event. */
   "EVENT_INVITE",
+  /** A reminder ("Hatırlatma") set on a to-do or event is due. */
+  "REMINDER",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -82,6 +84,8 @@ const notifySchema = z.object({
   path: z.string().refine(isValidNotificationPath, "Geçersiz bildirim yolu."),
   /** Team-only ("Yalnızca ekip") content: never notify GUEST members. */
   internal: z.boolean().optional(),
+  /** System-sent (e.g. the reminders cron): no actor, and ctx.userId is not dropped from the recipients. */
+  system: z.boolean().optional(),
 });
 
 export type NotifyInput = z.input<typeof notifySchema>;
@@ -98,7 +102,7 @@ function logFailure(where: string, e: unknown) {
 export async function notify(ctx: TenantContext, input: NotifyInput): Promise<number> {
   try {
     const data = parseInput(notifySchema, input);
-    const wanted = [...new Set(data.recipientIds)].filter((id) => id !== ctx.userId);
+    const wanted = [...new Set(data.recipientIds)].filter((id) => data.system === true || id !== ctx.userId);
     if (wanted.length === 0) return 0;
     // Lock the recipients' membership rows (FOR SHARE) and insert in the same
     // transaction: a concurrent removeMember's DELETE then waits for this
@@ -126,7 +130,7 @@ export async function notify(ctx: TenantContext, input: NotifyInput): Promise<nu
         data: recipients.map((m) => ({
           workspaceId: ctx.workspaceId,
           userId: m.userId,
-          actorId: ctx.userId,
+          actorId: data.system === true ? null : ctx.userId,
           type: data.type,
           title: data.title,
           body: data.body || null,

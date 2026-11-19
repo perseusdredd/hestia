@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarDays, CheckCircle2, Circle, ListTodo, UserRound } from "lucide-react";
+import { ArrowLeft, BellRing, CalendarDays, CheckCircle2, Circle, ListTodo, UserRound } from "lucide-react";
 
 import { CommentThread } from "@/components/comments/comment-thread";
 import { BookmarkToggle } from "@/components/bookmarks/bookmark-toggle";
@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDueDate, todayDateOnly } from "@/lib/date-only";
 import { formatDateTime } from "@/lib/format";
+import { toIstanbulInputValue } from "@/lib/istanbul-time";
 import { requireWorkspace } from "@/lib/tenant";
 import { getTodoItemDetail } from "@/server/todos";
 import { isBookmarked } from "@/server/bookmarks";
@@ -135,6 +136,15 @@ export default async function TodoItemPage({ params }: { params: Params }) {
                   <dd className="flex items-center gap-1.5 tabular-nums">
                     <CalendarDays className="size-4 text-muted-foreground" aria-hidden />
                     {formatDueDate(item.startOn)}
+                  </dd>
+                </div>
+              ) : null}
+              {item.remindAt ? (
+                <div className="space-y-1">
+                  <dt className="text-xs text-muted-foreground">Hatırlatma</dt>
+                  <dd className="flex items-center gap-1.5 tabular-nums">
+                    <BellRing className="size-4 text-muted-foreground" aria-hidden />
+                    {toIstanbulInputValue(new Date(item.remindAt), true).replace("T", " ")}
                   </dd>
                 </div>
               ) : null}

@@ -18,6 +18,7 @@ function readEvent(formData: FormData) {
     recurrenceUntil: formString(formData, "recurrenceUntil"),
     inviteeIds: formData.getAll("inviteeIds").map(String),
     projectId: formString(formData, "projectId"),
+    remindAt: formString(formData, "remindAt"),
     internal: formFlag(formData, "internal"),
   };
 }
