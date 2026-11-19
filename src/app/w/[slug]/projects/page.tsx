@@ -2,13 +2,17 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { FolderKanban } from "lucide-react";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { hasRole } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenant";
+import { listTemplates } from "@/server/project-templates";
 import { listProjects, type ProjectDTO } from "@/server/projects";
 
+import { deleteTemplateAction } from "./actions";
 import { NewProjectForm } from "./project-forms";
+import { NewTemplateForm, RenameTemplateForm, UseTemplateForm } from "./template-forms";
 
 export const metadata: Metadata = { title: "Projeler" };
 
@@ -33,6 +37,8 @@ export default async function ProjectsPage({ params }: { params: Promise<{ slug:
   const { ctx } = await requireWorkspace(slug);
   const { active, archived } = await listProjects(ctx);
   const isAdmin = hasRole(ctx.role, "ADMIN");
+  // Templates are ADMIN+ only; everyone else never even queries them.
+  const templates = isAdmin ? await listTemplates(ctx) : [];
 
   return (
     <div className="space-y-6">
@@ -67,6 +73,50 @@ export default async function ProjectsPage({ params }: { params: Promise<{ slug:
               <ProjectRow key={p.id} slug={slug} project={p} />
             ))}
           </ul>
+        </section>
+      ) : null}
+
+      {isAdmin ? (
+        <section className="space-y-3" aria-labelledby="project-templates">
+          <h2 id="project-templates" className="text-sm font-semibold text-muted-foreground">
+            Şablonlar
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Şablonlar yapılacak listelerini, klasör yapısını ve başlangıç mesajı başlıklarını saklar; kişi, tarih ve dosya
+            içeriği kopyalanmaz. Bir projeyi açıp &quot;Şablon olarak kaydet&quot; ile de şablon oluşturabilirsiniz.
+          </p>
+          <NewTemplateForm slug={slug} />
+          {templates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Henüz şablon yok.</p>
+          ) : (
+            <ul className="grid gap-3 lg:grid-cols-2" aria-label="Şablonlar">
+              {templates.map((t) => (
+                <li key={t.id} className="grid gap-3 rounded-lg border bg-card p-4 shadow-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="grid gap-1">
+                      <span className="font-medium break-words">{t.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t.counts.todoLists} liste, {t.counts.todoItems} yapılacak, {t.counts.folders} klasör,{" "}
+                        {t.counts.posts} taslak mesaj
+                      </span>
+                    </div>
+                    <ConfirmAction
+                      action={deleteTemplateAction.bind(null, slug)}
+                      fields={{ id: t.id }}
+                      title="Şablon silinsin mi?"
+                      description="Bu şablondan daha önce oluşturulan projeler etkilenmez."
+                      confirmLabel="Sil"
+                      successMessage="Şablon silindi."
+                      trigger="Sil"
+                      triggerVariant="outline"
+                    />
+                  </div>
+                  <UseTemplateForm slug={slug} template={t} />
+                  <RenameTemplateForm slug={slug} template={t} />
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       ) : null}
     </div>

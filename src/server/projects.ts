@@ -64,48 +64,69 @@ function requireAdmin(ctx: TenantContext) {
 }
 
 /** Serialise slug/position allocation per workspace (released at COMMIT). */
-async function lockProjects(tx: Prisma.TransactionClient, workspaceId: string) {
+export async function lockProjects(tx: Prisma.TransactionClient, workspaceId: string) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`projects:${workspaceId}`}))`;
+}
+
+/**
+ * Inserts a project (slug + position allocated) inside the caller's transaction.
+ * Caller must already hold lockProjects. Templates share the slug namespace but
+ * are not counted against the project cap and do not take a list position.
+ */
+export async function insertProjectTx(
+  tx: Prisma.TransactionClient,
+  ctx: TenantContext,
+  data: { name: string; description: string | null; isTemplate?: boolean; templateSpec?: Prisma.InputJsonValue },
+): Promise<Project> {
+  const isTemplate = data.isTemplate ?? false;
+  const base = slugify(data.name) || (isTemplate ? "sablon" : "proje");
+  if (!isTemplate) {
+    const count = await tx.project.count({ where: { workspaceId: ctx.workspaceId, isTemplate: false } });
+    if (count >= MAX_PROJECTS) {
+      throw new ServiceError("VALIDATION", `Bir alanda en fazla ${MAX_PROJECTS} proje olabilir.`);
+    }
+  }
+  const taken = new Set(
+    (
+      await tx.project.findMany({
+        where: { workspaceId: ctx.workspaceId, slug: { startsWith: base } },
+        select: { slug: true },
+      })
+    ).map((p) => p.slug),
+  );
+  let slug = base;
+  for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
+  const max = await tx.project.aggregate({
+    where: { workspaceId: ctx.workspaceId, isTemplate: false },
+    _max: { position: true },
+  });
+  return tx.project.create({
+    data: {
+      workspaceId: ctx.workspaceId,
+      createdById: ctx.userId,
+      name: data.name,
+      slug,
+      description: data.description,
+      position: isTemplate ? 0 : (max._max.position ?? -1) + 1,
+      isTemplate,
+      ...(data.templateSpec !== undefined ? { templateSpec: data.templateSpec } : {}),
+    },
+  });
 }
 
 export async function createProject(ctx: TenantContext, input: unknown): Promise<ProjectDTO> {
   requireAdmin(ctx);
   const data = parseInput(createSchema, input);
-  const base = slugify(data.name) || "proje";
   const project = await db.$transaction(async (tx) => {
     await lockProjects(tx, ctx.workspaceId);
-    const count = await tx.project.count({ where: { workspaceId: ctx.workspaceId } });
-    if (count >= MAX_PROJECTS) {
-      throw new ServiceError("VALIDATION", `Bir alanda en fazla ${MAX_PROJECTS} proje olabilir.`);
-    }
-    const taken = new Set(
-      (
-        await tx.project.findMany({
-          where: { workspaceId: ctx.workspaceId, slug: { startsWith: base } },
-          select: { slug: true },
-        })
-      ).map((p) => p.slug),
-    );
-    let slug = base;
-    for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
-    const max = await tx.project.aggregate({ where: { workspaceId: ctx.workspaceId }, _max: { position: true } });
-    return tx.project.create({
-      data: {
-        workspaceId: ctx.workspaceId,
-        createdById: ctx.userId,
-        name: data.name,
-        slug,
-        description: data.description ?? null,
-        position: (max._max.position ?? -1) + 1,
-      },
-    });
+    return insertProjectTx(tx, ctx, { name: data.name, description: data.description ?? null });
   });
   return toDTO(project);
 }
 
 async function findProjectById(ctx: TenantContext, id: string) {
   const project = await db.project.findFirst({
-    where: { id: parseInput(idSchema, id), workspaceId: ctx.workspaceId },
+    where: { id: parseInput(idSchema, id), workspaceId: ctx.workspaceId, isTemplate: false },
   });
   if (!project) throw notFound("Proje bulunamadı.");
   return project;
@@ -139,7 +160,7 @@ export async function archiveProject(ctx: TenantContext, id: string, archived = 
 /** Active projects first, archived ones separately (each in position order). */
 export async function listProjects(ctx: TenantContext): Promise<{ active: ProjectDTO[]; archived: ProjectDTO[] }> {
   const rows = await db.project.findMany({
-    where: { workspaceId: ctx.workspaceId },
+    where: { workspaceId: ctx.workspaceId, isTemplate: false },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
   });
   return {
@@ -151,7 +172,7 @@ export async function listProjects(ctx: TenantContext): Promise<{ active: Projec
 /** Active projects only, for the "Proje" selects in create forms. */
 export async function listProjectOptions(ctx: TenantContext): Promise<{ id: string; name: string }[]> {
   return db.project.findMany({
-    where: { workspaceId: ctx.workspaceId, archived: false },
+    where: { workspaceId: ctx.workspaceId, archived: false, isTemplate: false },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     select: { id: true, name: true },
   });
@@ -159,7 +180,7 @@ export async function listProjectOptions(ctx: TenantContext): Promise<{ id: stri
 
 export async function getProject(ctx: TenantContext, slug: string): Promise<ProjectDTO> {
   const project = await db.project.findFirst({
-    where: { workspaceId: ctx.workspaceId, slug: parseInput(slugParamSchema, slug) },
+    where: { workspaceId: ctx.workspaceId, slug: parseInput(slugParamSchema, slug), isTemplate: false },
   });
   if (!project) throw notFound("Proje bulunamadı.");
   return toDTO(project);
@@ -183,7 +204,7 @@ export async function assertAssignableProject(
 ): Promise<string | null> {
   if (!projectId) return null;
   const project = await client.project.findFirst({
-    where: { id: projectId, workspaceId: ctx.workspaceId },
+    where: { id: projectId, workspaceId: ctx.workspaceId, isTemplate: false },
     select: { id: true, archived: true },
   });
   if (!project) {

@@ -860,6 +860,10 @@ model Project {
   description String?  @db.Text
   archived    Boolean  @default(false)
   position    Int      @default(0)
+  // Template: a project marked as a template holds a structure-only skeleton in templateSpec
+  // (to-do lists, folders, starter message titles). Never listed as a normal project.
+  isTemplate   Boolean @default(false)
+  templateSpec Json?
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

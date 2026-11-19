@@ -12,7 +12,7 @@ import { requireWorkspace } from "@/lib/tenant";
 import { isServiceError } from "@/server/errors";
 import { getProjectOverview } from "@/server/projects";
 
-import { archiveProjectAction } from "../actions";
+import { archiveProjectAction, saveProjectAsTemplateAction } from "../actions";
 import { RenameProjectForm } from "../project-forms";
 
 export const metadata: Metadata = { title: "Proje" };
@@ -72,6 +72,20 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
               <ArrowLeft aria-hidden />
               Projeler
             </Link>
+            {isAdmin ? (
+              <ConfirmAction
+                action={saveProjectAsTemplateAction.bind(null, slug)}
+                fields={{ id: project.id }}
+                title="Şablon olarak kaydedilsin mi?"
+                description="Yapılacak listeleri, klasör yapısı ve mesaj başlıkları kopyalanır; kişi, tarih ve dosya içeriği kopyalanmaz."
+                confirmLabel="Kaydet"
+                destructive={false}
+                successMessage="Şablon olarak kaydedildi."
+                trigger="Şablon olarak kaydet"
+                triggerVariant="outline"
+                triggerSize="default"
+              />
+            ) : null}
             {isAdmin ? (
               <ConfirmAction
                 action={archiveProjectAction.bind(null, slug)}
