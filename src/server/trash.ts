@@ -310,11 +310,16 @@ async function purgeFiles(
     ...(take ? { take } : {}),
   });
   if (rows.length === 0) return 0;
+  // Older versions cascade with the file row; collect their objects first.
+  const versions = await db.fileVersion.findMany({
+    where: { fileId: { in: rows.map((r) => r.id) } },
+    select: { storageKey: true, workspaceId: true },
+  });
   const res = await db.file.deleteMany({ where: { id: { in: rows.map((r) => r.id) }, deletedAt: trashed } });
   // After the commit; UploadKey rows stay, so a replayed upload token cannot bring the file back.
   await deleteObjects(
     storage ?? getStorage(),
-    rows.filter((r) => keyBelongsToWorkspace(r.storageKey, r.workspaceId)).map((r) => r.storageKey),
+    [...rows, ...versions].filter((r) => keyBelongsToWorkspace(r.storageKey, r.workspaceId)).map((r) => r.storageKey),
   );
   return res.count;
 }

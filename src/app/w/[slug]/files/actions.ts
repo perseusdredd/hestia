@@ -8,9 +8,11 @@ import { requireWorkspace } from "@/lib/tenant";
 import { ServiceError } from "@/server/errors";
 import {
   completeUpload,
+  completeVersionUpload,
   createDocument,
   createFolder,
   createPendingUpload,
+  createVersionUpload,
   deleteDocument,
   deleteFile,
   deleteFolder,
@@ -172,6 +174,34 @@ export async function completeUploadAction(
   try {
     const { ctx } = await requireWorkspace(slug);
     const file = await completeUpload(ctx, token);
+    revalidate(slug);
+    return { ok: true, data: { id: file.id } };
+  } catch (e) {
+    return toActionState<{ id: string }>(e);
+  }
+}
+
+/** "Yeni sürüm" step 1: token + target for replacing the bytes of an existing file. */
+export async function startVersionUploadAction(
+  slug: string,
+  input: { fileId: string; size: number; type: string },
+): Promise<ActionState<PendingUpload>> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    return { ok: true, data: await createVersionUpload(ctx, input) };
+  } catch (e) {
+    return toActionState<PendingUpload>(e);
+  }
+}
+
+/** "Yeni sürüm" step 3: snapshot the current bytes into history and point the file at the new ones. */
+export async function completeVersionUploadAction(
+  slug: string,
+  token: string,
+): Promise<ActionState<{ id: string }>> {
+  try {
+    const { ctx } = await requireWorkspace(slug);
+    const file = await completeVersionUpload(ctx, token);
     revalidate(slug);
     return { ok: true, data: { id: file.id } };
   } catch (e) {

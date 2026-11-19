@@ -207,7 +207,10 @@ export async function deleteWorkspace(
       });
     }
     const [files, pending] = await Promise.all([
-      tx.file.findMany({ where: { workspaceId: ctx.workspaceId }, select: { storageKey: true } }),
+      Promise.all([
+        tx.file.findMany({ where: { workspaceId: ctx.workspaceId }, select: { storageKey: true } }),
+        tx.fileVersion.findMany({ where: { workspaceId: ctx.workspaceId }, select: { storageKey: true } }),
+      ]).then(([a, b]) => [...a, ...b]),
       tx.uploadKey.findMany({ where: { workspaceId: ctx.workspaceId }, select: { storageKey: true } }),
     ]);
     await tx.workspace.delete({ where: { id: ctx.workspaceId } });

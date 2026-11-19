@@ -724,6 +724,7 @@ async function issueUpload(
   mimeType: string,
   chat: boolean,
   storage: StorageDriver,
+  versionOf?: string,
 ): Promise<PendingUpload> {
   const key = generateStorageKey(ctx.workspaceId, data.name);
   const token = signUploadToken({
@@ -736,6 +737,7 @@ async function issueUpload(
     t: mimeType,
     e: Date.now() + UPLOAD_TOKEN_TTL_MS,
     ...(chat ? { c: true } : {}),
+    ...(versionOf ? { v: versionOf } : {}),
   });
   const target = await storage.createUploadTarget(key, {
     contentType: mimeType,
@@ -787,6 +789,7 @@ export async function completeUpload(
   storage: StorageDriver = getStorage(),
 ) {
   const p = readToken(ctx, token);
+  if (p.v) throw new ServiceError("VALIDATION", "Bu yükleme yeni bir sürüm içindir.");
 
   const existing = await db.file.findUnique({ where: { storageKey: p.k } });
   if (existing) {
@@ -922,6 +925,7 @@ export async function acceptLocalUpload(
 }
 
 export async function renameFile(ctx: TenantContext, input: unknown) {
+  assertNotGuest(ctx);
   const data = parseInput(renameSchema(fileNameSchema), input);
   const file = await findFile(db, ctx, data.id);
   if (!canModify(ctx, file.uploadedById)) throw forbidden();
@@ -934,6 +938,7 @@ async function assertTargetFolder(tx: Tx, ctx: TenantContext, targetFolderId: st
 }
 
 export async function moveFile(ctx: TenantContext, input: unknown) {
+  assertNotGuest(ctx);
   const data = parseInput(moveSchema, input);
   const moved = await db.$transaction(async (tx) => {
     await lockTree(tx, ctx.workspaceId);
@@ -944,6 +949,184 @@ export async function moveFile(ctx: TenantContext, input: unknown) {
   });
   await syncActivityInternal(ctx, { type: "file", id: moved.id }); // the file follows its new folder
   return moved;
+}
+
+// ------------------------------------------------------ file versions ----
+
+const versionUploadSchema = z.object({
+  fileId: idSchema,
+  size: z.coerce
+    .number()
+    .int("Geçersiz dosya boyutu.")
+    .min(0, "Geçersiz dosya boyutu.")
+    .max(MAX_FILE_SIZE, "Dosya en fazla 25 MB olabilir."),
+  type: z.string().max(255).optional().nullable(),
+});
+
+/**
+ * Step 1 of "Yeni sürüm": the same direct-upload token as a normal upload,
+ * bound to an existing file. Team members only; the uploader or an admin may
+ * replace the file.
+ */
+export async function createVersionUpload(
+  ctx: TenantContext,
+  input: unknown,
+  storage: StorageDriver = getStorage(),
+): Promise<PendingUpload> {
+  assertNotGuest(ctx);
+  const data = parseInput(versionUploadSchema, input);
+  const file = await findFile(db, ctx, data.fileId);
+  if (file.fromChat) throw notFound("Dosya bulunamadı.");
+  if (!canModify(ctx, file.uploadedById)) throw forbidden();
+  const mimeType = data.type ? normalizeMimeType(data.type) : file.mimeType;
+  return issueUpload(
+    ctx,
+    { name: file.name, size: data.size, folderId: file.folderId },
+    mimeType,
+    false,
+    storage,
+    file.id,
+  );
+}
+
+/**
+ * Step 3 of "Yeni sürüm": verify the object, snapshot the file's CURRENT
+ * object into a FileVersion row (version N) and point the File at the new
+ * bytes. Name, folder (hence project / internal) and uploadedById (ownership)
+ * stay as they are. Keys are single-use like a normal upload; completing again
+ * after success returns the file (idempotent retry).
+ */
+export async function completeVersionUpload(
+  ctx: TenantContext,
+  token: unknown,
+  storage: StorageDriver = getStorage(),
+) {
+  assertNotGuest(ctx);
+  const p = readToken(ctx, token);
+  if (!p.v) throw new ServiceError("VALIDATION", "Yükleme oturumu geçersiz veya süresi dolmuş. Lütfen tekrar deneyin.");
+  const fileId = p.v;
+
+  const current = await findFile(db, ctx, fileId);
+  if (!canModify(ctx, current.uploadedById)) throw forbidden();
+  if (current.storageKey === p.k) return current; // already applied
+
+  const used = await db.uploadKey.findUnique({ where: { storageKey: p.k }, select: { storageKey: true } });
+  if (used) await rejectConsumedKey(storage, ctx, p.k);
+
+  const head = await storage.head(p.k);
+  if (!head) throw new ServiceError("VALIDATION", "Dosya yüklenemedi. Lütfen tekrar deneyin.");
+  if (head.size > MAX_FILE_SIZE || head.size !== p.s) {
+    await deleteObjects(storage, [p.k]);
+    throw new ServiceError("VALIDATION", "Yüklenen dosyanın boyutu beklenenle eşleşmiyor.");
+  }
+
+  try {
+    return await db.$transaction(async (tx) => {
+      await lockTree(tx, ctx.workspaceId);
+      const file = await findFile(tx, ctx, fileId);
+      if (!canModify(ctx, file.uploadedById)) throw forbidden();
+      await tx.uploadKey.create({ data: { storageKey: p.k, workspaceId: ctx.workspaceId } });
+      const last = await tx.fileVersion.aggregate({ where: { fileId: file.id }, _max: { version: true } });
+      await tx.fileVersion.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          fileId: file.id,
+          storageKey: file.storageKey,
+          size: file.size,
+          mimeType: file.mimeType,
+          uploadedById: file.versionById ?? file.uploadedById,
+          version: (last._max.version ?? 0) + 1,
+          createdAt: file.versionAt ?? file.createdAt,
+        },
+      });
+      return tx.file.update({
+        where: { id: file.id },
+        data: {
+          storageKey: p.k,
+          size: head.size,
+          mimeType: p.t,
+          versionById: ctx.userId,
+          versionAt: new Date(),
+        },
+      });
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      const row = await db.file.findUnique({ where: { storageKey: p.k } });
+      if (row && row.workspaceId === ctx.workspaceId && !row.deletedAt) return row;
+      throw new ServiceError("CONFLICT", KEY_USED_MESSAGE);
+    }
+    if (e instanceof ServiceError && (e.code === "NOT_FOUND" || e.code === "FORBIDDEN")) {
+      await deleteObjects(storage, [p.k]);
+    }
+    throw e;
+  }
+}
+
+export type FileVersionItem = {
+  /** null for the current version */
+  id: string | null;
+  version: number;
+  size: number;
+  mimeType: string;
+  createdAt: Date;
+  current: boolean;
+  uploadedBy: { id: string; name: string | null; email: string; image: string | null };
+};
+
+/** Version history of a visible file, newest first; the first entry is the current version. */
+export async function listFileVersions(ctx: TenantContext, fileId: string): Promise<FileVersionItem[]> {
+  const file = await findFile(db, ctx, parseInput(idSchema, fileId));
+  const old = await db.fileVersion.findMany({
+    where: { fileId: file.id, workspaceId: ctx.workspaceId },
+    orderBy: { version: "desc" },
+    include: { uploadedBy: userSelect },
+  });
+  const currentUser = await db.user.findUniqueOrThrow({
+    where: { id: file.versionById ?? file.uploadedById },
+    ...userSelect,
+  });
+  const top = (old[0]?.version ?? 0) + 1;
+  return [
+    {
+      id: null,
+      version: top,
+      size: file.size,
+      mimeType: file.mimeType,
+      createdAt: file.versionAt ?? file.createdAt,
+      current: true,
+      uploadedBy: currentUser,
+    },
+    ...old.map((v) => ({
+      id: v.id,
+      version: v.version,
+      size: v.size,
+      mimeType: v.mimeType,
+      createdAt: v.createdAt,
+      current: false,
+      uploadedBy: v.uploadedBy,
+    })),
+  ];
+}
+
+/** Download handle for an older version (same visibility rules as the current file). */
+export async function getFileVersionDownload(
+  ctx: TenantContext,
+  fileId: string,
+  versionId: string,
+  storage: StorageDriver = getStorage(),
+) {
+  const file = await findFile(db, ctx, parseInput(idSchema, fileId));
+  const version = await db.fileVersion.findFirst({
+    where: { id: parseInput(idSchema, versionId), fileId: file.id, workspaceId: ctx.workspaceId },
+  });
+  if (!version || !keyBelongsToWorkspace(version.storageKey, ctx.workspaceId)) throw notFound("Sürüm bulunamadı.");
+  const download = await storage.getDownload(version.storageKey, {
+    fileName: file.name,
+    contentType: version.mimeType,
+  });
+  if (!download) throw notFound("Dosya içeriği bulunamadı.");
+  return { file, version, download };
 }
 
 /** Moves the file to the trash (soft delete); the stored object stays until the trash is purged. */
@@ -980,12 +1163,21 @@ export async function hardDeleteFile(ctx: TenantContext, fileId: string, storage
   const id = parseInput(idSchema, fileId);
   const file = await findFile(db, ctx, id);
   if (!canModify(ctx, file.uploadedById)) throw forbidden();
+  const versionKeys = await db.fileVersion.findMany({
+    where: { fileId: file.id, workspaceId: ctx.workspaceId },
+    select: { storageKey: true },
+  });
   await db.$transaction(async (tx) => {
     await forgetActivity(ctx, [{ type: "file", id: file.id }], tx);
     await tx.file.deleteMany({ where: { id: file.id, workspaceId: ctx.workspaceId } });
   });
-  if (storage && keyBelongsToWorkspace(file.storageKey, ctx.workspaceId)) {
-    await deleteObjects(storage, [file.storageKey]);
+  if (storage) {
+    await deleteObjects(
+      storage,
+      [file.storageKey, ...versionKeys.map((v) => v.storageKey)].filter((k) =>
+        keyBelongsToWorkspace(k, ctx.workspaceId),
+      ),
+    );
   }
   return { folderId: file.folderId };
 }

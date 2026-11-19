@@ -23,3 +23,8 @@ export function inlineHref(fileId: string): string {
 export function fileViewHref(slug: string, fileId: string): string {
   return `/w/${slug}/files/view/${fileId}`;
 }
+
+/** Download endpoint for an older version of a file. */
+export function versionDownloadHref(fileId: string, versionId: string): string {
+  return `/api/files/${fileId}/versions/${versionId}`;
+}

@@ -42,6 +42,7 @@ model User {
   cardsAssigned   Card[]        @relation("CardAssignee")
   foldersCreated  Folder[]
   filesUploaded   File[]
+  fileVersionsUploaded FileVersion[]
   documents       Document[]
   eventsCreated   Event[]
   eventInvites    EventInvitee[]
@@ -126,6 +127,7 @@ model Workspace {
   todoAssignees TodoAssignee[]
   folders      Folder[]
   files        File[]
+  fileVersions FileVersion[]
   documents    Document[]
   events       Event[]
   eventInvitees EventInvitee[]
@@ -436,14 +438,39 @@ model File {
   // Soft delete: set while the row is in the trash (purged after 30 days by the cleanup cron).
   deletedAt   DateTime?
   deletedById String?
+  // Who / when uploaded the CURRENT bytes (null = the original upload: uploadedById / createdAt).
+  versionById String?
+  versionAt   DateTime?
 
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   folder      Folder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
   uploadedBy  User         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
   chatMessage ChatMessage?
+  versions    FileVersion[]
 
   @@index([workspaceId, folderId])
   @@index([workspaceId, deletedAt])
+}
+
+// Older bytes of a File (the File row itself points at the current version).
+model FileVersion {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  fileId       String
+  storageKey   String   @unique
+  size         Int
+  mimeType     String
+  uploadedById String
+  version      Int
+  // When these bytes were uploaded.
+  createdAt    DateTime @default(now())
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  file       File      @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  uploadedBy User      @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, version])
+  @@index([workspaceId, fileId])
 }
 
 model Document {

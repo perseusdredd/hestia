@@ -5,6 +5,8 @@ import Link from "next/link";
 import { ArrowLeft, Download } from "lucide-react";
 
 import { FilesBreadcrumbs } from "@/components/files/breadcrumbs";
+import { FileVersions } from "@/components/files/file-versions";
+import { ItemActions } from "@/components/files/item-actions";
 import { fileKind, formatBytes } from "@/components/files/file-meta";
 import { PdfPreview } from "@/components/files/pdf-preview";
 import { EmptyState } from "@/components/empty-state";
@@ -13,9 +15,10 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { displayName, UserAvatar } from "@/components/user-avatar";
 import { formatDateTime } from "@/lib/format";
+import { canModify, isGuest } from "@/lib/roles";
 import { TEXT_PREVIEW_MAX_BYTES } from "@/lib/storage/inline";
 import { requireWorkspace } from "@/lib/tenant";
-import { getFilePreview, type FilePreview } from "@/server/files";
+import { getFilePreview, listFileVersions, listFolderTree, type FilePreview } from "@/server/files";
 
 import { orNotFound } from "../../load";
 import { downloadHref, folderHref, inlineHref } from "../../paths";
@@ -25,7 +28,11 @@ type Params = Promise<{ slug: string; fileId: string }>;
 // One storage read per request, shared by generateMetadata and the page.
 const load = cache(async (slug: string, fileId: string) => {
   const { ctx } = await requireWorkspace(slug);
-  return orNotFound(() => getFilePreview(ctx, fileId));
+  const [preview, versions, tree] = await orNotFound(() =>
+    Promise.all([getFilePreview(ctx, fileId), listFileVersions(ctx, fileId), listFolderTree(ctx)]),
+  );
+  const mayModify = !isGuest(ctx.role) && canModify(ctx, preview.file.uploadedById);
+  return { ...preview, versions, tree, mayModify };
 });
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
@@ -105,7 +112,7 @@ function PreviewBody({ preview, fileId, name, mimeType }: {
 
 export default async function FileViewPage({ params }: { params: Params }) {
   const { slug, fileId } = await params;
-  const { file, breadcrumbs, preview } = await load(slug, fileId);
+  const { file, breadcrumbs, preview, versions, tree, mayModify } = await load(slug, fileId);
   const kind = fileKind(file.mimeType, file.name);
   const parentHref = folderHref(slug, file.folderId);
 
@@ -124,6 +131,14 @@ export default async function FileViewPage({ params }: { params: Params }) {
               <Download aria-hidden />
               İndir
             </a>
+            {mayModify ? (
+              <ItemActions
+                slug={slug}
+                item={{ kind: "file", id: file.id, name: file.name, locationId: file.folderId }}
+                canModify
+                folders={tree}
+              />
+            ) : null}
           </>
         }
       />
@@ -168,6 +183,27 @@ export default async function FileViewPage({ params }: { params: Params }) {
                 </dd>
               </div>
             </dl>
+          </CardContent>
+        </Card>
+
+        <Card className="h-fit lg:col-start-2">
+          <CardHeader>
+            <CardTitle>Sürümler</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <FileVersions
+              slug={slug}
+              fileId={file.id}
+              canUpload={mayModify}
+              versions={versions.map((v) => ({
+                id: v.id,
+                version: v.version,
+                size: v.size,
+                current: v.current,
+                createdAt: v.createdAt.toISOString(),
+                uploadedBy: v.uploadedBy,
+              }))}
+            />
           </CardContent>
         </Card>
       </div>
