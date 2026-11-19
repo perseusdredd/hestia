@@ -51,6 +51,7 @@ export function commentClientWhere(ctx: Pick<TenantContext, "role">): Prisma.Com
       { OR: [{ todoItemId: null }, { todoItem: { list: { internal: false } } }] },
       { OR: [{ documentId: null }, { document: documentClientWhere(ctx) }] },
       { OR: [{ eventId: null }, { event: { internal: false } }] },
+      { OR: [{ fileId: null }, { file: fileClientWhere(ctx) }] },
     ],
   };
 }

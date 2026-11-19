@@ -3,6 +3,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { formatMentionToken } from "@/lib/mentions";
 import type { TenantContext } from "@/lib/tenant-context";
+import { subjectInternal, syncActivityInternal, forgetActivity } from "@/server/activity";
+import { commentClientWhere } from "@/server/client-visibility";
+import { listReactions, toggleReaction } from "@/server/reactions";
 import { addComment, commentSubjectPath, countComments, deleteComment, listComments } from "@/server/comments";
 import { ServiceError } from "@/server/errors";
 import { searchWorkspace } from "@/server/search";
@@ -181,6 +184,86 @@ describe("comments on files", () => {
       await expect(db.comment.create({ data: { ...base, fileId: publicFile.id, postId: post.id } })).rejects.toThrow();
       await expect(db.comment.create({ data: { ...base, fileId: publicFile.id } })).resolves.toBeTruthy();
       await expect(db.comment.create({ data: { ...base, postId: post.id } })).resolves.toBeTruthy();
+    });
+  });
+  describe("comment guest filter, activity internal flag", () => {
+    const actOf = (commentId: string) =>
+      db.activity.findFirst({ where: { workspaceId: owner.workspaceId, subjectType: "comment", subjectId: commentId } });
+
+    it("commentClientWhere hides comments of internal / chat files from guests only", async () => {
+      const ci = await addComment(bob, internalFile, { body: "gizli-f" });
+      const cc = await addComment(bob, chatFile, { body: "gizli-sohbet" });
+      const cp = await addComment(bob, publicFile, { body: "acik-f" });
+      const ids = [ci.id, cc.id, cp.id];
+      const seen = async (c: TenantContext) =>
+        (await db.comment.findMany({ where: { id: { in: ids }, ...commentClientWhere(c) } })).map((x) => x.id).sort();
+      expect(await seen(guest)).toEqual([cp.id]);
+      expect(await seen(bob)).toEqual([...ids].sort());
+    });
+
+    it("guest cannot react to or read reactions on a comment of an internal file", async () => {
+      const ci = await addComment(bob, internalFile, { body: "r-gizli" });
+      const cp = await addComment(bob, publicFile, { body: "r-acik" });
+      expect(await code(toggleReaction(guest, { type: "comment", id: ci.id }, "👍"))).toBe("NOT_FOUND");
+      expect(await code(toggleReaction(guest, { type: "comment", id: cp.id }, "👍"))).toBe("OK");
+      await toggleReaction(bob, { type: "comment", id: ci.id }, "❤️");
+      expect(await listReactions(guest, "comment", [ci.id])).toEqual({});
+      expect(Object.keys(await listReactions(bob, "comment", [ci.id]))).toEqual([ci.id]);
+    });
+
+    it("comment activity on an internal-folder or chat file is internal; public stays visible", async () => {
+      const ci = await addComment(bob, internalFile, { body: "a1" });
+      const cc = await addComment(bob, chatFile, { body: "a2" });
+      const cp = await addComment(bob, publicFile, { body: "a3" });
+      expect(await subjectInternal(owner.workspaceId, { type: "comment", id: ci.id })).toBe(true);
+      expect((await actOf(ci.id))?.internal).toBe(true);
+      expect((await actOf(cc.id))?.internal).toBe(true);
+      expect((await actOf(cp.id))?.internal).toBe(false);
+    });
+
+    it("moving a file into an internal folder re-marks its comment activity (file case)", async () => {
+      const f = await mkFile(owner.workspaceId, uploader.userId);
+      const c = await addComment(bob, f, { body: "tasinacak" });
+      expect((await actOf(c.id))?.internal).toBe(false);
+      const closed = await db.folder.create({
+        data: { workspaceId: owner.workspaceId, createdById: owner.userId, name: "K", internal: true },
+      });
+      await db.file.update({ where: { id: f.id }, data: { folderId: closed.id } });
+      await syncActivityInternal(owner, f);
+      expect((await actOf(c.id))?.internal).toBe(true);
+      await db.file.update({ where: { id: f.id }, data: { folderId: null } });
+      await syncActivityInternal(owner, f);
+      expect((await actOf(c.id))?.internal).toBe(false);
+    });
+
+    it("toggling a folder internal re-marks file comment activity in the subtree (folder case)", async () => {
+      const folder = await db.folder.create({
+        data: { workspaceId: owner.workspaceId, createdById: owner.userId, name: "T" },
+      });
+      const sub = await db.folder.create({
+        data: { workspaceId: owner.workspaceId, createdById: owner.userId, name: "T2", parentId: folder.id },
+      });
+      const f1 = await mkFile(owner.workspaceId, uploader.userId, { folderId: folder.id });
+      const f2 = await mkFile(owner.workspaceId, uploader.userId, { folderId: sub.id });
+      const c1 = await addComment(bob, f1, { body: "k1" });
+      const c2 = await addComment(bob, f2, { body: "k2" });
+      expect((await actOf(c1.id))?.internal).toBe(false);
+      await db.folder.updateMany({ where: { id: { in: [folder.id, sub.id] } }, data: { internal: true } });
+      await syncActivityInternal(owner, { type: "folder", id: folder.id });
+      expect((await actOf(c1.id))?.internal).toBe(true);
+      expect((await actOf(c2.id))?.internal).toBe(true);
+      await db.folder.updateMany({ where: { id: { in: [folder.id, sub.id] } }, data: { internal: false } });
+      await syncActivityInternal(owner, { type: "folder", id: folder.id });
+      expect((await actOf(c1.id))?.internal).toBe(false);
+      expect((await actOf(c2.id))?.internal).toBe(false);
+    });
+
+    it("forgetActivity on a file also drops its comment activity rows", async () => {
+      const f = await mkFile(owner.workspaceId, uploader.userId);
+      const c = await addComment(bob, f, { body: "silinecek" });
+      expect(await actOf(c.id)).not.toBeNull();
+      await forgetActivity(owner, [f]);
+      expect(await actOf(c.id)).toBeNull();
     });
   });
 });

@@ -116,6 +116,7 @@ type CommentParentRow = {
   todoItemId: string | null;
   documentId: string | null;
   eventId: string | null;
+  fileId: string | null;
 };
 
 /** True when a document is hidden from guests: its own flag or its folder's. */
@@ -153,13 +154,14 @@ export async function subjectInternal(workspaceId: string, subject: ActivitySubj
     case "comment": {
       const c: CommentParentRow | null = await db.comment.findFirst({
         where,
-        select: { postId: true, todoItemId: true, documentId: true, eventId: true },
+        select: { postId: true, todoItemId: true, documentId: true, eventId: true, fileId: true },
       });
       if (!c) return false;
       if (c.postId) return subjectInternal(workspaceId, { type: "post", id: c.postId });
       if (c.todoItemId) return subjectInternal(workspaceId, { type: "todoItem", id: c.todoItemId });
       if (c.documentId) return subjectInternal(workspaceId, { type: "document", id: c.documentId });
       if (c.eventId) return subjectInternal(workspaceId, { type: "event", id: c.eventId });
+      if (c.fileId) return subjectInternal(workspaceId, { type: "file", id: c.fileId });
       return false;
     }
   }
@@ -208,7 +210,12 @@ export async function syncActivityInternal(ctx: Pick<TenantContext, "workspaceId
         await commentsOf("todoItemId", [id], internal);
         return;
       }
-      case "file":
+      case "file": {
+        const internal = await subjectInternal(workspaceId, subject);
+        await markSubjects(workspaceId, "file", [id], internal);
+        await commentsOf("fileId", [id], internal);
+        return;
+      }
       case "comment": {
         await markSubjects(workspaceId, subject.type, [id], await subjectInternal(workspaceId, subject));
         return;
@@ -228,6 +235,8 @@ export async function syncActivityInternal(ctx: Pick<TenantContext, "workspaceId
         const fileInternal = (f: (typeof files)[number]) => f.fromChat || (f.folderId !== null && internalFolders.has(f.folderId));
         await markSubjects(workspaceId, "file", files.filter(fileInternal).map((f) => f.id), true);
         await markSubjects(workspaceId, "file", files.filter((f) => !fileInternal(f)).map((f) => f.id), false);
+        await commentsOf("fileId", files.filter(fileInternal).map((f) => f.id), true);
+        await commentsOf("fileId", files.filter((f) => !fileInternal(f)).map((f) => f.id), false);
         const docs = await db.document.findMany({ where: { workspaceId, folderId: { in: folderIds } }, select: { id: true, folderId: true, internal: true } });
         const docInternal = (d: (typeof docs)[number]) => d.internal || (d.folderId !== null && internalFolders.has(d.folderId));
         const yes = docs.filter(docInternal).map((d) => d.id);
@@ -347,6 +356,7 @@ const COMMENT_PARENT_KEYS = {
   todoItem: "todoItemId",
   document: "documentId",
   event: "eventId",
+  file: "fileId",
 } as const satisfies Partial<Record<ActivitySubjectType, string>>;
 
 /**
