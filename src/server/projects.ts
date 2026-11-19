@@ -275,6 +275,9 @@ export async function getProjectOverview(ctx: TenantContext, slug: string): Prom
   const scope = { workspaceId: ctx.workspaceId, projectId: project.id, deletedAt: null, ...clientVisibleWhere(ctx) };
   const postWhere: Prisma.PostWhereInput = { ...scope, ...visiblePostWhere(ctx) };
   const folderWhere = { ...scope, parentId: null };
+  // The events preview shows what is still ahead (or recurring), not the oldest rows.
+  const now = new Date();
+  const eventWhere = { ...scope, OR: [{ recurrence: { not: "NONE" } }, { endsAt: { gte: now } }] };
   const [posts, lists, folders, events, postCount, listCount, folderCount, eventCount] = await Promise.all([
     db.post.findMany({
       where: postWhere,
@@ -295,7 +298,7 @@ export async function getProjectOverview(ctx: TenantContext, slug: string): Prom
       select: { id: true, name: true },
     }),
     db.event.findMany({
-      where: scope,
+      where: eventWhere,
       orderBy: [{ startsAt: "asc" }, { id: "asc" }],
       take: OVERVIEW_TAKE,
       select: { id: true, title: true, startsAt: true, endsAt: true, allDay: true, recurrence: true },

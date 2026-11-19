@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { db } from "@/lib/db";
 import { createEvent } from "@/server/calendar";
-import { createFolder } from "@/server/files";
+import { createFolder, moveFolder } from "@/server/files";
 import { createPost, listPosts, publishPost } from "@/server/messages";
 import {
   archiveProject,
@@ -390,5 +390,31 @@ describe("proje görünümü ve çalışma alanı listeleri", () => {
     expect(post.projectId).toBeNull();
     expect((await listPosts(member)).items).toHaveLength(1);
     expect(await listTodoLists(member)).toHaveLength(0);
+  });
+});
+
+describe("project consistency fixes", () => {
+  it("moving a folder updates its (and its subtree's) project", async () => {
+    const u = await createTestUser();
+    const { ctx } = await createTestWorkspace(u.id);
+    const a = await createProject(ctx, { name: "A projesi" });
+    const b = await createProject(ctx, { name: "B projesi" });
+    const src = await createFolder(ctx, { name: "src", projectId: a.id });
+    const sub = await createFolder(ctx, { name: "alt", parentId: src.id }); // inherits A
+    const dest = await createFolder(ctx, { name: "dest", projectId: b.id });
+    expect((await db.folder.findUnique({ where: { id: sub.id } }))!.projectId).toBe(a.id);
+
+    await moveFolder(ctx, { id: src.id, targetFolderId: dest.id }); // A -> under a B folder
+    expect((await db.folder.findUnique({ where: { id: src.id } }))!.projectId).toBe(b.id);
+    expect((await db.folder.findUnique({ where: { id: sub.id } }))!.projectId).toBe(b.id);
+  });
+
+  it("an archived project accepts no new subfolder", async () => {
+    const u = await createTestUser();
+    const { ctx } = await createTestWorkspace(u.id);
+    const p = await createProject(ctx, { name: "Arşiv" });
+    const root = await createFolder(ctx, { name: "k", projectId: p.id });
+    await archiveProject(ctx, p.id);
+    expect(await code(createFolder(ctx, { name: "yeni", parentId: root.id }))).toBe("VALIDATION");
   });
 });

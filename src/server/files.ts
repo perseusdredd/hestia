@@ -420,6 +420,8 @@ export async function createFolder(ctx: TenantContext, input: unknown) {
     if (data.parentId) {
       const parent = await findFolder(tx, ctx, data.parentId);
       projectId = parent.projectId;
+      // An archived project accepts no new items, not even via an inherited parent.
+      if (projectId) await assertAssignableProject(ctx, projectId, tx);
       internal = internal || parent.internal; // a subfolder of a team-only folder is team-only too
       const chain = await ancestorChain(tx, ctx, data.parentId);
       if (chain.length >= MAX_FOLDER_DEPTH) {
@@ -498,7 +500,7 @@ export async function moveFolder(ctx: TenantContext, input: unknown) {
     if (folder.parentId === data.targetFolderId) return folder;
 
     let targetDepth = 0;
-    let target: { internal: boolean } | null = null;
+    let target: { internal: boolean; projectId: string | null } | null = null;
     if (data.targetFolderId) {
       if (data.targetFolderId === folder.id) {
         throw new ServiceError("VALIDATION", "Bir klasör kendi içine taşınamaz.");
@@ -516,7 +518,19 @@ export async function moveFolder(ctx: TenantContext, input: unknown) {
       throw new ServiceError("VALIDATION", "Klasörler en fazla 20 seviye iç içe olabilir.");
     }
     await assertUniqueFolderName(tx, ctx, data.targetFolderId, folder.name, folder.id);
-    const updated = await tx.folder.update({ where: { id: folder.id }, data: { parentId: data.targetFolderId } });
+    // A folder follows its destination's project (root = Genel / null); the whole
+    // subtree is kept consistent so it shows under the right project overview.
+    const newProjectId = target ? target.projectId : null;
+    const updated = await tx.folder.update({
+      where: { id: folder.id },
+      data: { parentId: data.targetFolderId, projectId: newProjectId },
+    });
+    if (folder.projectId !== newProjectId && descendants.length) {
+      await tx.folder.updateMany({
+        where: { id: { in: descendants.map((d) => d.id) }, workspaceId: ctx.workspaceId },
+        data: { projectId: newProjectId },
+      });
+    }
     // Moved into a team-only folder: the whole subtree becomes team-only.
     if (target?.internal && !folder.internal) await cascadeInternal(tx, ctx, folder.id);
     return { updated, hidden: Boolean(target?.internal) && !folder.internal };
